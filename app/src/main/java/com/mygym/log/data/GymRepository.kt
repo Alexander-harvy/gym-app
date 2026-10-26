@@ -27,12 +27,19 @@ class GymRepository(val db: GymDatabase, val preferences: PreferenceStore) {
     }
     suspend fun exercise(e: Exercise) { Rules.text(e.name, "Name"); Rules.text(e.muscle, "Muscle group"); Rules.text(e.equipment, "Equipment"); require(e.tracking in listOf("WEIGHTED", "BODYWEIGHT")); dao.put(e) }
     suspend fun routine(r: Routine) { Rules.text(r.name, "Routine name"); dao.put(r) }
+    suspend fun createRoutine(name: String): String = db.withTransaction {
+        Rules.text(name,"Plan name")
+        val r=Routine(name=name,position=(dao.allRoutines().maxOfOrNull{it.position} ?: -1)+1)
+        dao.put(r);r.id
+    }
     suspend fun target(r: RoutineExercise) { Rules.targets(r.targetSets, r.targetReps, r.restSeconds); dao.put(r) }
-    suspend fun start(routineId: String? = null): String = lock.withLock {
+    suspend fun start(routineId: String? = null, name: String? = null, notes: String = ""): String = lock.withLock {
+        name?.let { Rules.text(it,"Workout name") }
+        require(notes.length<=10000) { "Notes must be at most 10,000 characters." }
         db.withTransaction {
             dao.active()?.let { return@withTransaction it.id }
             val r = dao.allRoutines().find { it.id == routineId }
-            val w = Workout(name = r?.name ?: "Workout", timerDuration = preferences.flow.first().restSeconds * 1000L)
+            val w = Workout(name = name ?: r?.name ?: "Workout", notes=notes, timerDuration = preferences.flow.first().restSeconds * 1000L)
             dao.put(w)
             dao.allRoutineExercises().filter { it.routineId == routineId }.sortedBy { it.position }.forEach { target ->
                 val e = dao.allExercises().first { it.id == target.exerciseId }
@@ -43,12 +50,47 @@ class GymRepository(val db: GymDatabase, val preferences: PreferenceStore) {
             w.id
         }
     }
-    suspend fun addExercise(workoutId: String, e: Exercise) = db.withTransaction {
+    suspend fun addExercise(workoutId: String, e: Exercise, targetSets: Int = 1, targetReps: Int = 8, restSeconds: Int? = null) = db.withTransaction {
+        val rest=restSeconds ?: preferences.flow.first().restSeconds
+        Rules.targets(targetSets,targetReps,rest)
         require(dao.workout(workoutId) != null) { "Workout no longer exists." }
         val we = WorkoutExercise(workoutId = workoutId, exerciseId = e.id, nameSnapshot = e.name, trackingSnapshot = e.tracking,
             position = (dao.allWorkoutExercises().filter { it.workoutId == workoutId }.maxOfOrNull { it.position } ?: -1) + 1,
-            restSeconds = preferences.flow.first().restSeconds)
-        dao.put(we); dao.put(WorkoutSet(workoutExerciseId = we.id, position = 0))
+            restSeconds = rest)
+        dao.put(we)
+        repeat(targetSets) { dao.put(WorkoutSet(workoutExerciseId = we.id, position = it, reps=targetReps)) }
+    }
+    suspend fun addCustomExercise(workoutId: String, e: Exercise, sets: Int, reps: Int, rest: Int) = db.withTransaction {
+        Rules.targets(sets,reps,rest)
+        exercise(e)
+        addExercise(workoutId,e,sets,reps,rest)
+    }
+    suspend fun addRoutineExercise(routineId: String, e: Exercise, sets: Int, reps: Int, rest: Int, custom: Boolean=false) = db.withTransaction {
+        require(dao.allRoutines().any { it.id==routineId }) { "Routine no longer exists." }
+        Rules.targets(sets,reps,rest)
+        if(custom)exercise(e)
+        val position=(dao.allRoutineExercises().filter{it.routineId==routineId}.maxOfOrNull{it.position} ?: -1)+1
+        target(RoutineExercise(routineId=routineId,exerciseId=e.id,position=position,targetSets=sets,targetReps=reps,restSeconds=rest))
+    }
+    suspend fun saveAsRoutine(workoutId: String, name: String): String = db.withTransaction {
+        Rules.text(name,"Plan name")
+        require(dao.workout(workoutId)!=null) { "Workout no longer exists." }
+        val exercises=dao.allWorkoutExercises().filter{it.workoutId==workoutId}.sortedBy{it.position}
+        require(exercises.isNotEmpty()) { "Add at least one exercise before saving a plan." }
+        val sets=dao.allSets().groupBy{it.workoutExerciseId}
+        val routine=Routine(name=name,position=(dao.allRoutines().maxOfOrNull{it.position} ?: -1)+1)
+        dao.put(routine)
+        exercises.forEachIndexed { index,e ->
+            val working=sets[e.id].orEmpty().filter{!it.warmup}.sortedBy{it.position}
+            target(RoutineExercise(routineId=routine.id,exerciseId=e.exerciseId,position=index,
+                targetSets=working.size.coerceAtLeast(1),targetReps=working.firstOrNull()?.reps ?: 8,restSeconds=e.restSeconds))
+        }
+        routine.id
+    }
+    suspend fun exerciseRest(id: String, rest: Int) = db.withTransaction {
+        Rules.targets(1,1,rest)
+        val e=dao.workoutExercise(id) ?: error("Exercise no longer exists.")
+        dao.put(e.copy(restSeconds=rest))
     }
     suspend fun addSet(e: WorkoutExercise) = db.withTransaction {
         require(dao.workoutExercise(e.id) != null) { "Exercise no longer exists." }

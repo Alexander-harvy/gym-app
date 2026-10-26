@@ -65,6 +65,7 @@ fun GymApp(vm: GymViewModel) {
         val detail=route in listOf("active", "routine/{id}", "workout/{id}", "run/{id}")
         val activeWorkout=data.workouts.firstOrNull{it.activeSlot==1}
         val activeRun=data.runs.firstOrNull{it.activeSlot==1}
+        var creatingWorkout by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
             if(activity?.intent?.getBooleanExtra("open_running",false)==true) {
                 activity.intent.removeExtra("open_running");nav.navigate("running"){launchSingleTop=true}
@@ -103,7 +104,7 @@ fun GymApp(vm: GymViewModel) {
             }
         }}) { padding ->
             NavHost(nav,"home",Modifier.padding(padding)) {
-                composable("home") { Home(data,busy,{vm.act { vm.repo.start() }; nav.navigate("active")},{nav.navigate("active")},{nav.navigate("routines")},{nav.navigate("history")}) }
+                composable("home") { Home(data,busy,{creatingWorkout=true},{nav.navigate("active")},{nav.navigate("routines")},{nav.navigate("history")}) }
                 composable("exercises") { Exercises(vm,data,busy) }
                 composable("routines") { Routines(vm,data,prefs,busy,{nav.navigate("routine/$it")},{nav.navigate("active")}) }
                 composable("routine/{id}") { back -> RoutineEditor(vm,data,prefs,back.arguments?.getString("id")!!,busy) }
@@ -115,6 +116,9 @@ fun GymApp(vm: GymViewModel) {
                 composable("running") { RunningScreen(vm,data,open={nav.navigate("run/$it")}) }
                 composable("run/{id}") { back -> RunningScreen(vm,data,back.arguments?.getString("id"),open={nav.navigate("run/$it")}) }
             }
+        }
+        if(creatingWorkout)NewWorkoutForm(busy,{creatingWorkout=false}) { name,notes ->
+            vm.act(onSuccess={creatingWorkout=false;nav.navigate("active"){launchSingleTop=true}}) { vm.repo.start(name=name,notes=notes) }
         }
         backup?.let { b -> Confirm("Replace all local records?", "This backup contains ${b.data.workouts.size} workouts, ${b.data.runs.size} runs and ${b.data.exercises.size} exercises. Restore replaces all records and settings, including unfinished sessions. Pause any recording run before restoring. Export a backup first if you want to keep your current data.", busy,
             {vm.pendingBackup.value=null}, {vm.restore()}) }
@@ -169,7 +173,7 @@ fun Home(data: Snapshot,busy: Boolean,start: ()->Unit,resume: ()->Unit,routines:
             Column(Modifier.fillMaxWidth().padding(24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
                 Eyebrow(if(active==null) "Your next session" else "Pick up where you left off")
                 Text(active?.name ?: "Show up.\nGet stronger.",style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Black)
-                Text(active?.let{"Started ${date(it.startedAt)}"} ?: "One session at a time. Start fresh or follow your plan.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(active?.let{"Started ${date(it.startedAt)}"} ?: "Create your own workout. Pick any exercises, sets and reps, or follow a saved plan.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Action(if(active==null) "Start workout" else "Resume workout",!busy,if(active==null)start else resume)
             }
         }
@@ -177,7 +181,7 @@ fun Home(data: Snapshot,busy: Boolean,start: ()->Unit,resume: ()->Unit,routines:
             StatTile((Metrics.weekly(data)[monday] ?: 0).toString(),"This week",Modifier.weight(1f))
             StatTile(completed.size.toString(),"Total workouts",Modifier.weight(1f))
         }
-        SectionTitle("Your routines","View all",routines)
+        SectionTitle("Your workout plans","View all",routines)
         if(data.routines.isEmpty()) {
             EmptyState("Make your next session easier","Build a routine with your go-to exercises, sets, and reps.")
             Quiet("Create a routine",onClick=routines)
@@ -226,26 +230,28 @@ fun Exercises(vm: GymViewModel,data: Snapshot,busy: Boolean) {
 @Composable
 fun ExerciseForm(e: Exercise?,busy: Boolean,dismiss: ()->Unit,save: (Exercise)->Unit) {
     var name by remember { mutableStateOf(e?.name ?: "") };var muscle by remember { mutableStateOf(e?.muscle ?: "") };var equipment by remember { mutableStateOf(e?.equipment ?: "") };var tracking by remember{mutableStateOf(e?.tracking ?: "WEIGHTED")}
-    Form(if(e==null) "New exercise" else "Edit exercise",busy,dismiss,{save(Exercise(e?.id ?: newId(),name.trim(),muscle.trim(),equipment.trim(),tracking,e?.archived ?: false))}) {
-        Input("Name",name,{name=it});Input("Muscle group",muscle,{muscle=it});Input("Equipment",equipment,{equipment=it});Choices(listOf("WEIGHTED","BODYWEIGHT"),tracking,{tracking=it})
+    Form(if(e==null) "New exercise" else "Edit exercise",busy,dismiss,{save(Exercise(e?.id ?: newId(),name.trim(),muscle.trim().ifBlank{"General"},equipment.trim().ifBlank{"None"},tracking,e?.archived ?: false))}) {
+        Input("Name",name,{name=it});Input("Muscle group (optional)",muscle,{muscle=it});Input("Equipment (optional)",equipment,{equipment=it});Choices(listOf("WEIGHTED","BODYWEIGHT"),tracking,{tracking=it})
         Text("Bodyweight sets accept 0 external weight. Added load is recorded separately from your body weight.")
     }
 }
 @Composable
-fun ExercisePicker(data: Snapshot,dismiss: ()->Unit,pick: (Exercise)->Unit) {
+fun ExercisePicker(data: Snapshot,dismiss: ()->Unit,create: ((String)->Unit)?=null,busy: Boolean=false,pick: (Exercise)->Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     AlertDialog(onDismissRequest=dismiss,title={Text("Choose exercise")},text={Column {
         Input("Search exercises",query,{query=it})
-        LazyColumn(Modifier.heightIn(max=350.dp)) { items(data.exercises.filter{!it.archived && it.name.contains(query,true)},key={it.id}) { e -> TextButton({pick(e)},Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text("${e.name} · ${e.equipment}") } } }
-        if(data.exercises.none{!it.archived}) Text("Add an exercise in the Exercises tab first.")
-    }},confirmButton={TextButton(dismiss){Text("Close")}})
+        val matches=data.exercises.filter{!it.archived && listOf(it.name,it.muscle,it.equipment).any{value->value.contains(query,true)}}
+        LazyColumn(Modifier.heightIn(max=280.dp)) { items(matches,key={it.id}) { e -> TextButton({pick(e)},Modifier.fillMaxWidth().heightIn(min=48.dp),enabled=!busy) { Text("${e.name} · ${e.equipment}") } } }
+        if(matches.isEmpty())Text(if(create!=null)"Nothing matching? Create your own exercise below." else "No matching exercises.")
+        if(create!=null)Action("Create custom exercise",!busy){create(query.trim())}
+    }},confirmButton={TextButton(dismiss,enabled=!busy){Text("Close")}})
 }
 
 @Composable
 fun Routines(vm: GymViewModel,data: Snapshot,prefs: Preferences,busy: Boolean,edit: (String)->Unit,active: ()->Unit) {
     var add by remember { mutableStateOf(false) };var name by rememberSaveable{mutableStateOf("")};var deleting by remember{mutableStateOf<Routine?>(null)}
-    Page("Your routines","Less planning. More training.") {
-        Action("Create routine",!busy){name="";add=true}
+    Page("Your workout plans","Create any workout plan with your own exercises and targets.") {
+        Action("Create workout plan",!busy){name="";add=true}
         if(data.routines.isEmpty()) EmptyState("Build your first plan","Add your favorite exercises and set your targets. Your workout history stays independent.")
         data.routines.forEach { r -> Panel {
             Row(verticalAlignment=Alignment.CenterVertically) {
@@ -259,7 +265,11 @@ fun Routines(vm: GymViewModel,data: Snapshot,prefs: Preferences,busy: Boolean,ed
             Quiet("Edit routine",!busy){edit(r.id)}
         } }
     }
-    if(add) Form("Create routine",busy,{add=false},{vm.act{vm.repo.routine(Routine(name=name.trim(),position=(data.routines.maxOfOrNull{it.position} ?: -1)+1));add=false}}){Input("Routine name",name,{name=it})}
+    if(add) Form("Create workout plan",busy,{add=false},{
+        var createdId=""
+        val planName=name.trim()
+        vm.act(onSuccess={add=false;edit(createdId)}){createdId=vm.repo.createRoutine(planName)}
+    }){Input("Plan name",name,{name=it});Text("Use any name, then add existing or custom exercises. Every plan can have its own sets, reps and rest times.")}
     deleting?.let { r -> Confirm("Delete ${r.name}?","Existing workouts will be kept.",busy,{deleting=null},{vm.act{vm.repo.dao.deleteRoutine(r.id);deleting=null}}) }
 }
 
@@ -267,6 +277,9 @@ fun Routines(vm: GymViewModel,data: Snapshot,prefs: Preferences,busy: Boolean,ed
 fun RoutineEditor(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String,busy: Boolean) {
     val r=data.routines.find{it.id==id} ?: return
     var rename by remember{mutableStateOf(false)};var name by remember(r.name){mutableStateOf(r.name)};var picker by remember{mutableStateOf(false)};var target by remember{mutableStateOf<RoutineExercise?>(null)}
+    var setup by remember{mutableStateOf(false)}
+    var selectedExercise by remember{mutableStateOf<Exercise?>(null)}
+    var customName by remember{mutableStateOf("")}
     Page(r.name,"Targets are copied when you start a workout.") {
         Quiet("Rename routine",!busy){rename=true}
         Action("Add exercise",!busy){picker=true}
@@ -282,7 +295,10 @@ fun RoutineEditor(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String,
         } }
     }
     if(rename) Form("Rename routine",busy,{rename=false},{vm.act{vm.repo.routine(r.copy(name=name.trim()));rename=false}}){Input("Name",name,{name=it})}
-    if(picker) ExercisePicker(data,{picker=false}) { e -> vm.act{vm.repo.target(RoutineExercise(routineId=id,exerciseId=e.id,position=(data.routineExercises.filter{it.routineId==id}.maxOfOrNull{it.position} ?: -1)+1,restSeconds=prefs.restSeconds));picker=false} }
+    if(picker) ExercisePicker(data,{picker=false},create={query->selectedExercise=null;customName=query;picker=false;setup=true},busy=busy) { e -> selectedExercise=e;picker=false;setup=true }
+    if(setup)ExerciseSetupForm(selectedExercise,customName,prefs.restSeconds,busy,{setup=false}) { e,sets,reps,rest ->
+        vm.act(onSuccess={setup=false}){vm.repo.addRoutineExercise(id,e,sets,reps,rest,custom=selectedExercise==null)}
+    }
     target?.let { row -> TargetForm(row,busy,{target=null}){updated->vm.act{vm.repo.target(updated);target=null}} }
 }
 @Composable
@@ -299,6 +315,11 @@ fun WorkoutScreen(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String?
     if(w==null) { Page("No workout open") { Text("Start a workout from Home or select a finished workout from History.");Quiet("Back",onClick=exit) };return }
     var picker by remember{mutableStateOf(false)};var editSet by remember{mutableStateOf<WorkoutSet?>(null)};var editWorkout by remember{mutableStateOf(false)}
     var noteExercise by remember{mutableStateOf<WorkoutExercise?>(null)};var finish by remember{mutableStateOf(false)};var discard by remember{mutableStateOf(false)};var removeExercise by remember{mutableStateOf<WorkoutExercise?>(null)}
+    var setup by remember{mutableStateOf(false)}
+    var selectedExercise by remember{mutableStateOf<Exercise?>(null)}
+    var customName by remember{mutableStateOf("")}
+    var savingPlan by remember{mutableStateOf(false)}
+    var restExercise by remember{mutableStateOf<WorkoutExercise?>(null)}
     Page(w.name,if(w.finishedAt==null) "In progress · ${date(w.startedAt)}" else "Finished ${date(w.finishedAt)} · edits update progress") {
         val exercises=data.workoutExercises.filter{it.workoutId==w.id}
         val exerciseIds=exercises.map{it.id}.toSet()
@@ -321,8 +342,9 @@ fun WorkoutScreen(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String?
         exercises.forEach { e -> Panel {
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text(e.nameSnapshot,Modifier.weight(1f),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-                MoreMenu("Options for ${e.nameSnapshot}",busy,listOf(MenuAction("Exercise notes"){noteExercise=e},MenuAction("Move up"){vm.act{vm.repo.move("exercise",e.id,-1)}},MenuAction("Move down"){vm.act{vm.repo.move("exercise",e.id,1)}},MenuAction("Remove exercise",true){removeExercise=e}))
+                MoreMenu("Options for ${e.nameSnapshot}",busy,listOf(MenuAction("Exercise notes"){noteExercise=e},MenuAction("Customize rest"){restExercise=e},MenuAction("Move up"){vm.act{vm.repo.move("exercise",e.id,-1)}},MenuAction("Move down"){vm.act{vm.repo.move("exercise",e.id,1)}},MenuAction("Remove exercise",true){removeExercise=e}))
             }
+            Badge("${e.restSeconds}s rest · ${if(e.trackingSnapshot=="BODYWEIGHT")"Bodyweight" else "Weighted"}")
             val previous=data.workouts.filter{it.finishedAt!=null && it.id!=w.id && it.finishedAt<=w.startedAt}.sortedByDescending{it.finishedAt}.firstOrNull { old ->
                 data.workoutExercises.any{it.workoutId==old.id && it.exerciseId==e.exerciseId && data.sets.any{s->s.workoutExerciseId==it.id && s.completed}}
             }
@@ -337,9 +359,22 @@ fun WorkoutScreen(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String?
             if(e.notes.isNotBlank()) Text(e.notes)
         } }
         Action("Add exercise",!busy){picker=true}
+        Quiet("Save as workout plan",!busy && exercises.isNotEmpty()){savingPlan=true}
         if(w.activeSlot==1) { Action("Finish workout",!busy){finish=true} }
     }
-    if(picker) ExercisePicker(data,{picker=false}){e->vm.act{vm.repo.addExercise(w.id,e);picker=false}}
+    if(picker) ExercisePicker(data,{picker=false},create={query->selectedExercise=null;customName=query;picker=false;setup=true},busy=busy){e->selectedExercise=e;picker=false;setup=true}
+    if(setup)ExerciseSetupForm(selectedExercise,customName,prefs.restSeconds,busy,{setup=false}) { e,sets,reps,rest ->
+        vm.act(onSuccess={setup=false}) {
+            if(selectedExercise==null)vm.repo.addCustomExercise(w.id,e,sets,reps,rest)
+            else vm.repo.addExercise(w.id,e,sets,reps,rest)
+        }
+    }
+    if(savingPlan)SavePlanForm(w.name,busy,{savingPlan=false}) { name ->
+        vm.act(onSuccess={savingPlan=false;vm.message.value="Workout plan saved. Find it in Routines."}){vm.repo.saveAsRoutine(w.id,name)}
+    }
+    restExercise?.let { e -> ExerciseRestForm(e.restSeconds,busy,{restExercise=null}) { rest ->
+        vm.act(onSuccess={restExercise=null}){vm.repo.exerciseRest(e.id,rest)}
+    } }
     editSet?.let { s -> SetForm(s,prefs,busy,{editSet=null},{updated->vm.act{vm.repo.saveSet(updated);editSet=null}},{vm.act{vm.repo.dao.deleteSet(s.id);editSet=null}}) }
     if(editWorkout) WorkoutForm(w,busy,{editWorkout=false}){name,notes->vm.act{vm.repo.workoutText(w.id,name,notes);editWorkout=false}}
     noteExercise?.let { e -> NotesForm(e.notes,busy,{noteExercise=null}){notes->vm.act{vm.repo.exerciseNotes(e.id,notes);noteExercise=null}} }

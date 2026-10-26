@@ -1,13 +1,13 @@
-# Verification — My Gym Log 1.2 — October 26, 2026 (Asia/Manila)
+# Verification — My Gym Log 1.3 — October 26, 2026 (Asia/Manila)
 
 ## Final result
 
 `assembleDebug testDebugUnitTest lintDebug` completed with **BUILD SUCCESSFUL**, using Gradle 8.13, Android Studio JBR 21 and Android SDK 35.
 
-- **33 tests passed**, 0 failures, 0 errors: 5 gym metrics, 5 running calculations / filtering, 5 backup validation, 10 Room persistence / migration, 4 GPS service cases (2 tests each on API 28 and API 35), and 4 Compose interaction tests.
+- **42 tests passed**, 0 failures, 0 errors: 5 gym metrics, 5 running calculations / filtering, 5 backup validation, 16 Room persistence / migration / customization, 4 GPS service cases (2 tests each on API 28 and API 35), and 7 Compose interaction tests.
 - Lint: **0 errors, 13 warnings** about target SDK 35, newer AndroidX dependencies, and a String.toUri style suggestion. No running-feature lint errors are suppressed.
-- Debug APK: `My-Gym-Log.apk` at the project root and `app/build/outputs/apk/debug/app-debug.apk`, copied from the verified ASCII output directory. Version **1.2**, code **3**, app ID `com.mygym.log`, min SDK 26, target SDK 35. The existing local debug signing key supports an in-place update.
-- APK SHA-256: `FC312D207589E12F62323201E408502BF6DE9D1815C1F726B645A6323CBB7158`.
+- Debug APK: `My-Gym-Log.apk` at the project root and `app/build/outputs/apk/debug/app-debug.apk`, copied from the verified ASCII output directory. Version **1.3**, code **4**, app ID `com.mygym.log`, min SDK 26, target SDK 35. The existing local debug signing key supports an in-place update.
+- APK SHA-256: `55A146C17105EE619FF6444E0906AD4DE3703EBDE3F830AB73B77E26C6598CEF`.
 - Room schema **3** exported to `app/schemas/com.mygym.log.data.GymDatabase/3.json`; schema 2 remains committed. Explicit 1→2 and 2→3 migrations are registered without destructive fallback.
 - APK inspection with SDK aapt confirms location, foreground service / location service, and notification permissions. There is **no INTERNET, broad storage or ACCESS_BACKGROUND_LOCATION permission**. AndroidX also declares an app-private receiver permission. Automatic cloud backup and device transfer remain disabled.
 
@@ -20,13 +20,15 @@ Reports copied into this project:
 
 ## What was checked
 
+Customization tests verify named workouts and notes, inline custom exercise creation with arbitrary metadata and chosen sets / reps / rest, persistence across database reopen, transactional rollback without orphan library records, custom plan snapshot independence, converting working sets into a reusable plan without changing the original workout, custom rest applying to the next set without resetting an existing timer, and backup round trips of custom workouts / plans. The database remains schema 3 and backups remain schema 2; no new migration or destructive replacement is needed for this release.
+
 Running tests verify haversine distance and min/km pace, monotonic elapsed time, exclusion of pauses, filtering inaccurate / stale / out-of-order fixes and GPS jumps, segment breaks after gaps and resume, coordinate bounds and dateline distance, persistence after database reopen, recovery into paused state, concurrent starts returning one run, cascading route deletion, and migration retaining existing strength records.
 
 Backup tests verify legacy schema-1 compatibility, schema-2 running data, invalid coordinates / distance / relationships, rejection of restore during recording, preserved route points, and imported active runs paused with device-specific clock anchors cleared. Existing gym calculations, resume, routine snapshots and restore regressions passed.
 
 Service tests create a foreground notification, register a GPS listener, deliver a simulated fix through Android's LocationManager shadow, confirm a Room point was written, pause the service, confirm recording stops, and reject startup without precise permission. These run on Robolectric API 28 and 35; they are not physical GPS tests. An initial simulated-fix test exposed a test setup race; it now waits for listener registration before injection.
 
-Compose tests verify independent set-edit / completion controls, busy guards, Home start / resume states, options menus, and the route view's empty state, accessibility description and Fit route control. They are not screenshot or visual layout verification.
+Compose tests verify independent set-edit / completion controls, busy guards, Home start / resume states, options menus, the route view's empty state / accessibility / Fit route control, user-supplied workout names and notes, inline exercise creation from a search, and custom sets / reps / rest with optional metadata. Tests use a full activity-sized host and default Robolectric display metrics. Explicit width / height qualifiers caused dialog TextFields to hang before interaction; removing that test-only override resolved the [reported Robolectric issue](https://github.com/robolectric/robolectric/issues/8460). No tests were disabled or skipped. These are not screenshot or visual layout verification.
 
 ## Reproduce verification
 

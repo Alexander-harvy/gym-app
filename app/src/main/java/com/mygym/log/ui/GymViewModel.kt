@@ -22,11 +22,11 @@ class GymViewModel(private val app: GymApplication) : ViewModel() {
         catch(e: Exception){runError.value=e.message ?: "Unable to start tracking."}
     }
     init { act { app.ready.await(); repo.seed() } }
-    fun act(block: suspend () -> Unit) {
+    fun act(onSuccess: () -> Unit = {}, block: suspend () -> Unit) {
         if(busy.value) return
         busy.value=true
         viewModelScope.launch {
-            try { withContext(Dispatchers.IO) { block() } }
+            try { withContext(Dispatchers.IO) { block() };onSuccess() }
             catch(e: CancellationException) { throw e }
             catch(e: Exception) { message.value=e.message ?: "Unable to save change." }
             finally { busy.value=false }

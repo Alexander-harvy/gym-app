@@ -1,7 +1,9 @@
 package com.mygym.log.ui
 
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.mygym.log.data.*
@@ -14,7 +16,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[28],qualifiers="w390dp-h844dp")
+// Explicit w/h qualifiers can hang dialog TextFields in Robolectric (#8460).
+@Config(sdk=[28])
 @LooperMode(LooperMode.Mode.PAUSED)
 class UiInteractionTest {
     @get:Rule val compose = createComposeRule()
@@ -68,5 +71,37 @@ class UiInteractionTest {
         compose.onNodeWithText("Offline GPS route").assertExists()
         compose.onNodeWithText("Fit route").performClick()
         compose.onNodeWithContentDescription("Offline route with 2 recorded GPS points. North is up. Pinch to zoom and drag to pan. No street map.").assertExists()
+    }
+    @Test fun newWorkoutFormAcceptsAUserNameAndNotes() {
+        var saved: Pair<String,String>?=null
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { NewWorkoutForm(false,{}) { name,notes -> saved=name to notes } } } }
+        compose.onNodeWithText("Workout name").performTextInput("My own training day")
+        compose.onNodeWithText("Notes (optional)").performTextInput("Use whatever equipment is available")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals("My own training day" to "Use whatever equipment is available",saved)
+    }
+    @Test fun emptyPickerCanCreateTheTypedExerciseWithoutLeavingWorkout() {
+        var typed: String?=null
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { ExercisePicker(Snapshot(),{},create={typed=it}){} } } }
+        compose.onNodeWithText("Search exercises").performTextInput("My suitcase squat")
+        compose.onNodeWithText("Create custom exercise").performClick()
+        assertEquals("My suitcase squat",typed)
+    }
+    @Test fun customExerciseSetupUsesUserTargetsAndOptionalMetadata() {
+        var exercise: Exercise?=null
+        var targets: Triple<Int,Int,Int>?=null
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { ExerciseSetupForm(null,"My personal movement",90,false,{}) { e,sets,reps,rest ->
+            exercise=e;targets=Triple(sets,reps,rest)
+        } } } }
+        compose.onNodeWithText("Sets (1–50)").performScrollTo().performTextClearance()
+        compose.onNodeWithText("Sets (1–50)").performTextInput("4")
+        compose.onNodeWithText("Reps per set (1–1,000)").performScrollTo().performTextClearance()
+        compose.onNodeWithText("Reps per set (1–1,000)").performTextInput("12")
+        compose.onNodeWithText("Rest seconds (1–3,600)").performScrollTo().performTextClearance()
+        compose.onNodeWithText("Rest seconds (1–3,600)").performTextInput("75")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals("My personal movement",exercise!!.name)
+        assertEquals("General",exercise!!.muscle);assertEquals("None",exercise!!.equipment)
+        assertEquals(Triple(4,12,75),targets)
     }
 }

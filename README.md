@@ -2,6 +2,8 @@
 
 A native, personal strength-training and running log for Android 8.0 (API 26) and newer. Kotlin, Jetpack Compose / Material 3, Navigation Compose, ViewModel / StateFlow, Room, DataStore and coroutines. One application module and manual dependency injection. No account, subscription, ads, analytics, backend, or INTERNET permission. Android automatic backup and device transfer are disabled.
 
+Version 1.3 makes workout creation explicit: name your own workout, create any exercise directly from its picker, choose your own set / rep / rest targets when adding it, and save a session as a reusable workout plan. Muscle group and equipment are free text and optional, not fixed lists. It includes all 1.2 running features. Database schema 3 and JSON backup schema 2 are unchanged.
+
 Version 1.2 adds GPS runs with local routes, distance, active duration, average pace, pause/resume, history and backup support. The Run tab joins the existing navigation. All GPS samples stay in the app's Room database. The offline route view draws your actual recorded path, not a street map. No map SDK, API key, tile downloads or external map service is used.
 
 Version 1.1 refreshes the interface with charcoal surfaces and yellow accents, a four-tab bottom navigation bar, a dashboard with weekly / total counts, a persistent resume shortcut, searchable exercise library, and compact workout set rows. Tap a set's values to edit; tap its check button to save completion and start rest when auto-rest is enabled. Secondary actions such as reordering, notes, archiving and deletion are available from each card's labelled options menu. Progress includes accessible weekly bars with exact counts and all-time weekly totals. Dark, light and system preferences remain available.
@@ -43,14 +45,26 @@ Keep the same application ID and signing key when updating to preserve installed
 
 ## Use
 
-- Home starts an empty workout or resumes the one unfinished workout. Starting any routine while a workout is active resumes that workout.
+- Home opens a custom-workout form for a name and optional notes, or resumes the one unfinished workout. Starting any routine while a workout is active resumes that workout.
 - Exercises contains common seeded exercises and custom exercises. Edit their name, muscle group, equipment and tracking type. Archive / unarchive hides or shows exercises in new-workout pickers while preserving references and history.
-- Routines lets you create, rename, delete and reorder plans. Open a plan to add, remove and reorder exercises and edit target sets, reps and rest seconds. Starting a plan copies its name, exercises and targets into a separate workout.
+- Routines lets you create, rename, delete and reorder your own workout plans. Creating a plan opens its editor immediately. Add existing or custom exercises and choose their target sets, reps and rest seconds. Starting a plan copies its name, exercises and targets into a separate workout.
 - In a workout, add / reorder / remove exercises, add sets, and tap a set to enter external weight and repetitions, warm-up / working status, and completion. Tap Save to accept and persist the edit. Invalid values leave the editor open and show an error. Add workout and exercise notes using their edit buttons. Saved changes survive restart; unfinished editor text is not an accepted change.
 - Finish requires at least one completed set and confirmation. Discard, exercise removal, set deletion and history deletion require confirmation. Finished workouts can be opened in History and edited; progress recalculates from saved records.
 - The rest timer has start, pause, resume, reset and skip controls. Completing a previously incomplete set starts rest when enabled in Settings. Running timers persist an epoch-millisecond end timestamp in Room, so background time and process death do not reset them. Paused timers persist their remaining duration. No background alerts, vibration, sound or notifications are implemented. A device clock adjustment changes remaining wall-clock time.
 - Progress lists completed workouts by week, external weight history per exercise, the heaviest completed working set with reps/date, and external-weight volume. Archived exercises remain available for progress selection.
 - Settings controls kilograms / pounds, dark / light / system theme, default rest seconds and automatic rest. The default applies to newly added exercises / newly started empty workouts; routine rest targets are copied individually.
+
+## Create a custom workout
+
+1. On Home, tap **Start workout**, enter any workout name (for example, My home training day), optionally add notes, and save.
+2. Tap **Add exercise**. Search your library by name, muscle group or equipment, or tap **Create custom exercise**. A search with no match can become the new exercise name without leaving the workout.
+3. For a new exercise, type any name. Muscle group and equipment are optional free text; blank values are stored as General and None. Choose weighted or bodyweight tracking, then enter the starting sets, reps and rest seconds. The library exercise and workout entry are saved together only after valid submission; cancelling saves neither.
+4. Existing exercises also open the target form before being added. Defaults are suggestions (3 sets, 8 reps, and your default rest); you can replace them. Edit individual sets for different weights, reps, warm-ups and completion status as you train. Add or delete sets, reorder / remove exercises, and add notes. **Customize rest** in an exercise's options changes its next automatic rest duration without resetting a running timer.
+5. Tap **Save as workout plan** from an active or historical session if you want to reuse it. Give the plan your own name; it appears in Routines. This copies order, per-exercise rest, working-set counts, and the first working set's reps as the target for that exercise. It excludes warm-ups, weights, notes and completion flags; exercises with no working sets default to 1 set × 8 reps. Edit the plan's targets afterwards as needed. Saving a plan does not alter the original session, and later plan changes do not alter history.
+
+You can also create a named plan directly in **Routines → Create workout plan** and add custom exercises there. The seeded library is a starting point, not a restriction: your exercises are saved in the same editable library and available to future sessions, plans, history, progress and backups. Exercise names and tracking types in existing workouts remain historical snapshots.
+
+Strength exercises currently track external weight and repetitions (weighted / bodyweight). Customization does not add timed sets, supersets or other new measurement types. Target ranges remain 1–50 initial sets, 1–1,000 reps and 1–3,600 rest seconds. A plan with more than 50 working sets for one exercise cannot be saved until that count is reduced. Individual live sets can still be added and edited as before.
 
 ## Running
 

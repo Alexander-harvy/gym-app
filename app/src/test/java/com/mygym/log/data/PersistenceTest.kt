@@ -164,4 +164,86 @@ class PersistenceTest {
         val restored=repo.dao.activeRun()!!
         assertEquals("PAUSED",restored.state);assertEquals(5000L,restored.durationMs);assertNull(restored.lastTickElapsedMs)
     } }
+    @Test fun namedWorkoutAndInlineCustomExercisePersistWithChosenTargets() = runBlocking { withContext(Dispatchers.IO) {
+        val id=repo.start(name="My home circuit",notes="Use the band today")
+        val custom=Exercise(name="My band row",muscle="My pulling group",equipment="Homemade band")
+        repo.addCustomExercise(id,custom,4,12,75)
+        db.close();open()
+        val saved=repo.dao.active()!!
+        assertEquals("My home circuit",saved.name);assertEquals("Use the band today",saved.notes)
+        assertEquals(listOf(custom),repo.dao.allExercises())
+        val exercise=repo.dao.allWorkoutExercises().single()
+        assertEquals(custom.id,exercise.exerciseId);assertEquals(75,exercise.restSeconds)
+        assertEquals(4,repo.dao.allSets().size)
+        assertTrue(repo.dao.allSets().all{it.reps==12 && !it.completed})
+    } }
+    @Test fun invalidCustomExerciseSetupRollsBackLibraryAndWorkoutChanges() = runBlocking { withContext(Dispatchers.IO) {
+        val id=repo.start(name="Custom session")
+        val e=Exercise(name="My movement",muscle="General",equipment="None")
+        try{repo.addCustomExercise(id,e,0,8,90);fail("Invalid sets accepted")}catch(_: IllegalArgumentException){}
+        try{repo.addCustomExercise("missing",e,3,8,90);fail("Missing workout accepted")}catch(_: IllegalArgumentException){}
+        assertTrue(repo.dao.allExercises().isEmpty());assertTrue(repo.dao.allWorkoutExercises().isEmpty());assertTrue(repo.dao.allSets().isEmpty())
+        try{repo.start(name=" ");fail("Blank name accepted")}catch(_: IllegalArgumentException){}
+        assertEquals(id,repo.dao.active()!!.id)
+    } }
+    @Test fun customPlanTargetsAreCopiedIntoIndependentWorkout() = runBlocking { withContext(Dispatchers.IO) {
+        val plan=repo.createRoutine("My own push day")
+        val e=Exercise(name="Chair push-up",muscle="Chest and arms",equipment="My chair",tracking="BODYWEIGHT")
+        repo.addRoutineExercise(plan,e,2,15,120,custom=true)
+        val id=repo.start(plan)
+        val original=repo.dao.allRoutineExercises().single()
+        repo.target(original.copy(targetSets=5,targetReps=20,restSeconds=30))
+        repo.exercise(e.copy(name="Renamed chair exercise"))
+        assertEquals("My own push day",repo.dao.workout(id)!!.name)
+        assertEquals("Chair push-up",repo.dao.allWorkoutExercises().single().nameSnapshot)
+        assertEquals(120,repo.dao.allWorkoutExercises().single().restSeconds)
+        assertEquals(2,repo.dao.allSets().size);assertTrue(repo.dao.allSets().all{it.reps==15 && it.weightKg==0.0})
+    } }
+    @Test fun saveWorkoutAsPlanCopiesWorkingTargetsWithoutModifyingOriginal() = runBlocking { withContext(Dispatchers.IO) {
+        val id=repo.start(name="Custom legs")
+        val e=Exercise(name="My squat variation",muscle="Legs",equipment="Dumbbell")
+        repo.addCustomExercise(id,e,3,10,60)
+        val sets=repo.dao.allSets().sortedBy{it.position}
+        repo.saveSet(sets.first().copy(warmup=true,weightKg=10.0,completed=true))
+        repo.saveSet(sets[1].copy(weightKg=25.0,reps=12,completed=true))
+        val before=repo.dao.snapshot()
+        val plan=repo.saveAsRoutine(id,"Repeat my legs")
+        val target=repo.dao.allRoutineExercises().single()
+        assertEquals(2,target.targetSets);assertEquals(12,target.targetReps);assertEquals(60,target.restSeconds)
+        assertEquals(before.workouts,repo.dao.allWorkouts());assertEquals(before.sets,repo.dao.allSets())
+        repo.finish(id)
+        val copy=repo.start(plan)
+        assertNotEquals(id,copy)
+        val copiedId=repo.dao.allWorkoutExercises().first{it.workoutId==copy}.id
+        val copiedSets=repo.dao.allSets().filter{it.workoutExerciseId==copiedId}
+        assertEquals(2,copiedSets.size);assertTrue(copiedSets.all{it.reps==12 && it.weightKg==0.0 && !it.completed && !it.warmup})
+    } }
+    @Test fun customRestAppliesToNextCompletionWithoutResettingCurrentTimer() = runBlocking { withContext(Dispatchers.IO) {
+        repo.preferences.save(Preferences(restSeconds=90,autoRest=true))
+        val id=repo.start(name="My workout")
+        val e=Exercise(name="My lift",muscle="General",equipment="None")
+        repo.addCustomExercise(id,e,1,8,90)
+        repo.timer(id,"start")
+        val before=repo.dao.workout(id)!!
+        val we=repo.dao.allWorkoutExercises().single()
+        repo.exerciseRest(we.id,45)
+        assertEquals(before,repo.dao.workout(id))
+        try{repo.exerciseRest(we.id,0);fail("Invalid rest accepted")}catch(_: IllegalArgumentException){}
+        assertEquals(45,repo.dao.workoutExercise(we.id)!!.restSeconds)
+        repo.saveSet(repo.dao.allSets().single().copy(completed=true))
+        assertEquals(45000L,repo.dao.workout(id)!!.timerDuration)
+    } }
+    @Test fun customWorkoutAndPlanRoundTripThroughBackup() = runBlocking { withContext(Dispatchers.IO) {
+        val id=repo.start(name="自分のワークアウト",notes="My own notes")
+        val e=Exercise(name="My invented movement",muscle="User-defined group",equipment="User-defined equipment",tracking="BODYWEIGHT")
+        repo.addCustomExercise(id,e,2,7,40)
+        repo.saveAsRoutine(id,"My repeatable plan")
+        val original=repo.dao.snapshot()
+        val b=Backup(data=original,preferences=Preferences())
+        BackupValidator.validate(b)
+        val service=BackupService(repo,context.contentResolver)
+        service.restore(Backup(data=Snapshot(),preferences=Preferences()))
+        service.restore(b)
+        assertEquals(original,repo.dao.snapshot())
+    } }
 }
