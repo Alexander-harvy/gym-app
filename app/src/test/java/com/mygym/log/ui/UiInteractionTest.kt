@@ -1,6 +1,7 @@
 package com.mygym.log.ui
 
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -90,9 +91,12 @@ class UiInteractionTest {
     @Test fun customExerciseSetupUsesUserTargetsAndOptionalMetadata() {
         var exercise: Exercise?=null
         var targets: Triple<Int,Int,Int>?=null
-        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { ExerciseSetupForm(null,"My personal movement",90,false,{}) { e,sets,reps,rest ->
-            exercise=e;targets=Triple(sets,reps,rest)
+        var load=0.0
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { ExerciseSetupForm(null,"My personal movement",90,false,{}) { e,sets,reps,rest,weight ->
+            exercise=e;targets=Triple(sets,reps,rest);load=weight
         } } } }
+        compose.onNodeWithText("Starting weight (kg)").performScrollTo().performTextClearance()
+        compose.onNodeWithText("Starting weight (kg)").performTextInput("23.5")
         compose.onNodeWithText("Sets (1–50)").performScrollTo().performTextClearance()
         compose.onNodeWithText("Sets (1–50)").performTextInput("4")
         compose.onNodeWithText("Reps per set (1–1,000)").performScrollTo().performTextClearance()
@@ -103,5 +107,52 @@ class UiInteractionTest {
         assertEquals("My personal movement",exercise!!.name)
         assertEquals("General",exercise!!.muscle);assertEquals("None",exercise!!.equipment)
         assertEquals(Triple(4,12,75),targets)
+        assertEquals(23.5,load,0.0)
+    }
+    @Test fun predefinedExerciseAcceptsPoundsAndReturnsCanonicalKg() {
+        val e=Exercise(name="Bench press",muscle="Chest",equipment="Barbell")
+        var load=0.0
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { ExerciseSetupForm(e,"",90,false,{},unit="lb") { _,_,_,_,kg->load=kg } } } }
+        compose.onNodeWithText("Starting weight (lb)").performScrollTo().performTextClearance()
+        compose.onNodeWithText("Starting weight (lb)").performTextInput("44.0924524")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals(20.0,load,.000001)
+    }
+    @Test fun bodyFormRecordsWeightAndHeightWithExplicitUnits() {
+        var saved: BodyMeasurement?=null
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { BodyMeasurementForm(null,"lb",false,{}){saved=it} } } }
+        compose.onNodeWithText("Body weight (lb, optional)").performTextInput("165.3466966")
+        compose.onNodeWithText("Height (cm, optional)").performTextInput("178.5")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals(75.0,saved!!.weightKg!!,.000001);assertEquals(178.5,saved!!.heightCm!!,0.0)
+    }
+    @Test fun invalidBodyEntryShowsInlineErrorAndDoesNotSave() {
+        var saved=false
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { BodyMeasurementForm(null,"kg",false,{}){saved=true} } } }
+        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText("Enter a body weight, height, or both.").assertExists()
+        assertFalse(saved)
+        compose.onNodeWithText("Height (cm, optional)").performTextInput("0")
+        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText("Height must be between 10 and 300 cm.").assertExists()
+        assertFalse(saved)
+    }
+    @Test fun editingBodyNotesPreservesFullPrecisionMeasurements() {
+        val original=BodyMeasurement(recordedAt=946684800000,weightKg=75.123456,heightCm=178.123456)
+        var saved: BodyMeasurement?=null
+        compose.setContent { GymTheme { Surface(Modifier.fillMaxSize()) { BodyMeasurementForm(original,"lb",false,{}){saved=it} } } }
+        compose.onNodeWithText("Notes").performScrollTo().performClick()
+        compose.onNodeWithText("Measurement notes").performScrollTo().performTextInput("Updated note")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals(original.weightKg,saved!!.weightKg);assertEquals(original.heightCm,saved!!.heightCm)
+        assertEquals("Updated note",saved!!.notes);assertEquals(original.recordedAt,saved!!.recordedAt)
+    }
+    @Test fun runHelpDisclosureStartsCollapsedAndCanBeHiddenAgain() {
+        compose.setContent { GymTheme { Surface { Disclosure("Run tips & permissions"){Text("Detailed run instructions")} } } }
+        compose.onNodeWithText("Detailed run instructions").assertDoesNotExist()
+        compose.onNodeWithText("Run tips & permissions").performClick()
+        compose.onNodeWithText("Detailed run instructions").assertExists()
+        compose.onNodeWithText("Run tips & permissions").performClick()
+        compose.onNodeWithText("Detailed run instructions").assertDoesNotExist()
     }
 }

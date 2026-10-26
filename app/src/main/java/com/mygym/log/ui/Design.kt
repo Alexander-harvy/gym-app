@@ -9,12 +9,14 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mygym.log.data.WorkoutSet
@@ -22,6 +24,17 @@ import com.mygym.log.data.Preferences
 import com.mygym.log.domain.Weight
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+
+@Composable fun Disclosure(title: String,initiallyExpanded: Boolean=false,content: @Composable ColumnScope.()->Unit) {
+    var expanded by rememberSaveable(title){mutableStateOf(initiallyExpanded)}
+    Column {
+        TextButton({expanded=!expanded},Modifier.fillMaxWidth().heightIn(min=48.dp).semantics{stateDescription=if(expanded)"Expanded" else "Collapsed"}) {
+            Text(title,Modifier.weight(1f))
+            Icon(if(expanded)Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,null)
+        }
+        if(expanded)Column(Modifier.padding(horizontal=8.dp),verticalArrangement=Arrangement.spacedBy(10.dp),content=content)
+    }
+}
 
 private val Yellow = Color(0xFFF3D447)
 @Composable

@@ -20,7 +20,8 @@ data class Routine(@PrimaryKey val id: String = newId(), val name: String, val p
     ForeignKey(entity = Exercise::class, parentColumns = ["id"], childColumns = ["exerciseId"], onDelete = ForeignKey.RESTRICT)],
     indices = [Index("routineId"), Index("exerciseId")])
 data class RoutineExercise(@PrimaryKey val id: String = newId(), val routineId: String, val exerciseId: String,
-    val position: Int, val targetSets: Int = 3, val targetReps: Int = 8, val restSeconds: Int = 90)
+    val position: Int, val targetSets: Int = 3, val targetReps: Int = 8, val restSeconds: Int = 90,
+    @ColumnInfo(defaultValue = "0.0") val targetWeightKg: Double = 0.0)
 
 @Serializable
 @Entity(indices = [Index("finishedAt"), Index("startedAt"), Index(value = ["activeSlot"], unique = true)])
@@ -45,14 +46,15 @@ data class WorkoutSet(@PrimaryKey val id: String = newId(), val workoutExerciseI
 data class Snapshot(val exercises: List<Exercise> = emptyList(), val routines: List<Routine> = emptyList(),
     val routineExercises: List<RoutineExercise> = emptyList(), val workouts: List<Workout> = emptyList(),
     val workoutExercises: List<WorkoutExercise> = emptyList(), val sets: List<WorkoutSet> = emptyList(),
-    val runs: List<Run> = emptyList(), val runPoints: List<RunPoint> = emptyList())
+    val runs: List<Run> = emptyList(), val runPoints: List<RunPoint> = emptyList(),
+    val bodyMeasurements: List<BodyMeasurement> = emptyList())
 
 @Serializable
 data class Preferences(val unit: String = "kg", val theme: String = "DARK", val restSeconds: Int = 90,
     val autoRest: Boolean = true)
 
 @Serializable
-data class Backup(val schemaVersion: Int = 2, val exportedAt: Long = System.currentTimeMillis(),
+data class Backup(val schemaVersion: Int = 3, val exportedAt: Long = System.currentTimeMillis(),
     val data: Snapshot, val preferences: Preferences)
 
 @Serializable
@@ -69,3 +71,8 @@ data class Run(@PrimaryKey val id: String = newId(), val name: String = "Outdoor
 data class RunPoint(@PrimaryKey val id: String = newId(), val runId: String, val sequence: Int, val segment: Int,
     val latitude: Double, val longitude: Double, val accuracyMeters: Double,
     val timestamp: Long, val elapsedRealtimeMs: Long)
+
+@Serializable
+@Entity(indices=[Index("recordedAt")])
+data class BodyMeasurement(@PrimaryKey val id: String=newId(),val recordedAt: Long=System.currentTimeMillis(),
+    val weightKg: Double?=null,val heightCm: Double?=null,val notes: String="")

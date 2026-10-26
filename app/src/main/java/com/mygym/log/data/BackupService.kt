@@ -37,10 +37,11 @@ object BackupValidator {
         }
         fields(root,"schemaVersion,exportedAt,data,preferences")
         val version=root.getValue("schemaVersion").jsonPrimitive.int
-        require(version in 1..2) { "Unsupported backup schema version." }
+        require(version in 1..3) { "Unsupported backup schema version." }
         val data=root["data"] as? JsonObject ?: error("Missing backup data.")
         fields(data,"exercises,routines,routineExercises,workouts,workoutExercises,sets")
-        if(version==2)fields(data,"runs,runPoints")
+        if(version>=2)fields(data,"runs,runPoints")
+        if(version>=3)fields(data,"bodyMeasurements")
         val pref=root["preferences"] as? JsonObject ?: error("Missing preferences.")
         fields(pref,"unit,theme,restSeconds,autoRest")
         val tables=mutableMapOf("exercises" to "id,name,muscle,equipment,tracking,archived", "routines" to "id,name,position",
@@ -48,9 +49,13 @@ object BackupValidator {
             "workouts" to "id,name,startedAt,finishedAt,activeSlot,notes,timerEnd,timerRemaining,timerDuration",
             "workoutExercises" to "id,workoutId,exerciseId,nameSnapshot,trackingSnapshot,position,notes,restSeconds",
             "sets" to "id,workoutExerciseId,position,weightKg,reps,warmup,completed")
-        if(version==2) {
+        if(version>=2) {
             tables["runs"]="id,name,startedAt,finishedAt,state,activeSlot,durationMs,lastTickElapsedMs,distanceMeters,segment,status"
             tables["runPoints"]="id,runId,sequence,segment,latitude,longitude,accuracyMeters,timestamp,elapsedRealtimeMs"
+        }
+        if(version>=3) {
+            tables["routineExercises"]="id,routineId,exerciseId,position,targetSets,targetReps,restSeconds,targetWeightKg"
+            tables["bodyMeasurements"]="id,recordedAt,weightKg,heightCm,notes"
         }
         tables.forEach { (key, expected) ->
             val rows=data[key] as? JsonArray ?: error("Invalid backup table: $key.")
@@ -59,17 +64,19 @@ object BackupValidator {
         return json.decodeFromJsonElement<Backup>(root).also(::validate)
     }
     fun validate(b: Backup) {
-        require(b.schemaVersion in 1..2) { "Unsupported backup schema version." }
+        require(b.schemaVersion in 1..3) { "Unsupported backup schema version." }
         require(b.exportedAt > 0) { "Invalid export timestamp." }
         Rules.preferences(b.preferences)
         val d=b.data
         require(b.schemaVersion!=1 || (d.runs.isEmpty() && d.runPoints.isEmpty())) { "Running records need backup schema 2." }
+        require(b.schemaVersion>=3 || (d.bodyMeasurements.isEmpty() && d.routineExercises.all{it.targetWeightKg==0.0})) { "Body measurements and plan loads need backup schema 3." }
         fun ids(values: List<String>) { require(values.size <= 100000 && values.all { it.isNotBlank() && it.length <= 100 } && values.distinct().size == values.size) { "Invalid or duplicate IDs." } }
         ids(d.exercises.map{it.id}); ids(d.routines.map{it.id}); ids(d.routineExercises.map{it.id}); ids(d.workouts.map{it.id}); ids(d.workoutExercises.map{it.id}); ids(d.sets.map{it.id})
         val ex=d.exercises.map{it.id}.toSet(); val routines=d.routines.map{it.id}.toSet(); val workouts=d.workouts.map{it.id}.toSet(); val we=d.workoutExercises.map{it.id}.toSet()
         d.exercises.forEach { Rules.text(it.name,"Exercise name"); Rules.text(it.muscle,"Muscle group"); Rules.text(it.equipment,"Equipment"); require(it.tracking in listOf("WEIGHTED","BODYWEIGHT")) }
         d.routines.forEach { Rules.text(it.name,"Routine name"); require(it.position>=0) }
-        d.routineExercises.forEach { require(it.routineId in routines && it.exerciseId in ex && it.position>=0) { "Broken routine relationship." }; Rules.targets(it.targetSets,it.targetReps,it.restSeconds) }
+        d.routineExercises.forEach { require(it.routineId in routines && it.exerciseId in ex && it.position>=0) { "Broken routine relationship." }; Rules.targets(it.targetSets,it.targetReps,it.restSeconds);Rules.set(it.targetWeightKg,it.targetReps) }
+        ids(d.bodyMeasurements.map{it.id});d.bodyMeasurements.forEach{Rules.body(it)}
         require(d.workouts.count { it.activeSlot == 1 } <= 1) { "Multiple active workouts." }
         d.workouts.forEach {
             Rules.text(it.name,"Workout name"); require(it.notes.length<=10000)
@@ -126,12 +133,13 @@ class BackupService(private val repo: GymRepository, private val resolver: Conte
             repo.preferences.save(b.preferences)
             try {
                 repo.db.withTransaction {
-                    val dao=repo.dao; dao.clearRuns();dao.clearWorkouts(); dao.clearRoutines(); dao.clearExercises()
+                    val dao=repo.dao; dao.clearBodyMeasurements();dao.clearRuns();dao.clearWorkouts(); dao.clearRoutines(); dao.clearExercises()
                     b.data.exercises.forEach { dao.put(it) }; b.data.routines.forEach { dao.put(it) }
                     b.data.routineExercises.forEach { dao.put(it) }; b.data.workouts.forEach { dao.put(it) }
                     b.data.workoutExercises.forEach { dao.put(it) }; b.data.sets.forEach { dao.put(it) }
                     b.data.runs.forEach { dao.put(if(it.activeSlot==1)it.copy(state="PAUSED",lastTickElapsedMs=null,status="Restored run. Resume when ready.") else it) }
                     b.data.runPoints.forEach { dao.insert(it) }
+                    b.data.bodyMeasurements.forEach { dao.put(it) }
                 }
             } catch(e: Exception) { repo.preferences.save(previous); throw e }
             repo.preferences.markSeeded()

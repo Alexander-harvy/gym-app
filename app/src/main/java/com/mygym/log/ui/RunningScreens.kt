@@ -42,10 +42,9 @@ fun runPace(meters: Double, ms: Long): String {
         Eyebrow(if(run.state=="FINISHED")"Saved run" else run.state.lowercase().replaceFirstChar(Char::uppercase))
         Text("${number(run.distanceMeters/1000)} km",style=MaterialTheme.typography.displayMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
         Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-            StatTile(runDuration(duration),"Active duration",Modifier.weight(1f))
-            StatTile(runPace(run.distanceMeters,duration),"Avg. min/km",Modifier.weight(1f))
+            Column(Modifier.weight(1f)){Text(runDuration(duration),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold);Text("Active duration",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+            Column(Modifier.weight(1f)){Text(runPace(run.distanceMeters,duration),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold);Text("Avg. min/km",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}
         }
-        Text("Pace = active duration ÷ recorded distance. Pauses are excluded; GPS signal gaps remain in active time.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -83,8 +82,12 @@ fun runPace(meters: Double, ms: Long): String {
         if(Tracker.hasPreciseLocation(context))begin()
         else locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION))
     }
-    Page(if(detailId==null)"Go for a run" else "Run details","GPS routes and running records stay on this device.") {
-        error?.let { Panel { Text(it,color=MaterialTheme.colorScheme.error) } }
+    Page(if(detailId==null)"Run" else "Run details") {
+        error?.let { Panel {
+            Text(it,color=MaterialTheme.colorScheme.error)
+            TextButton({context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))}){Text("Location settings")}
+            TextButton({context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}")))}){Text("App permissions")}
+        } }
         if(run!=null) {
             Text(date(run.startedAt),color=MaterialTheme.colorScheme.onSurfaceVariant)
             RunStats(run,elapsed)
@@ -99,22 +102,24 @@ fun runPace(meters: Double, ms: Long): String {
             }
             SectionTitle("Your route")
             RouteView(points)
-            Text("${points.size} saved GPS points · route breaks show pauses or signal gaps.\nOffline route view; no street map or map downloads.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${points.size} GPS points · offline route",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(run.state=="FINISHED")TextButton({deleting=run},enabled=!busy){Text("Delete saved run",color=MaterialTheme.colorScheme.error)}
         } else if(detailId==null) {
-            EmptyState("Take your training outdoors","Track distance, active time and average pace. Start outdoors and allow precise location for an accurate GPS fix.")
+            EmptyState("Ready when you are","Distance, time and pace. Stored on this device.")
             Action("Start run",!busy){request(Tracker.START)}
         } else EmptyState("Run no longer available","This record may have been deleted or replaced by a backup restore.")
-        if(detailId==null || run?.activeSlot==1) {
+        Disclosure("Run tips & permissions") {
+            Text("Use precise location outdoors. A recording notification offers Pause. If notifications are blocked, use the app's controls.",style=MaterialTheme.typography.bodySmall)
             Quiet("Location settings",!busy){context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))}
             TextButton({context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}")))}){Text("App permissions")}
-            Text("Keep precise location enabled while using the app. During recording, a foreground notification offers Pause and reopens this screen. If notification permission is denied, controls remain in the app. No background-location permission is requested.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Average pace = unpaused time ÷ recorded distance. GPS waiting time counts. Pauses and signal gaps are not joined on the offline route; there is no street map. Pinch to zoom or drag to pan the route. No background-location permission is requested.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if(detailId==null) {
             SectionTitle("Run history")
             val finished=data.runs.filter{it.state=="FINISHED"}.sortedByDescending{it.finishedAt}
             if(finished.isEmpty())EmptyState("Your next finish line","Finish and save a run to see its route and stats here.")
-            finished.forEach { saved -> Panel {
+            var allRuns by remember { mutableStateOf(false) }
+            (if(allRuns)finished else finished.take(3)).forEach { saved -> Panel {
                 Row {
                     Column(Modifier.weight(1f)){Eyebrow(date(saved.startedAt));Text("${number(saved.distanceMeters/1000)} km",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)}
                     MoreMenu("Run options for ${date(saved.startedAt)}",busy,listOf(MenuAction("Delete run",true){deleting=saved}))
@@ -122,6 +127,7 @@ fun runPace(meters: Double, ms: Long): String {
                 Text("${runDuration(saved.durationMs)} active · ${runPace(saved.distanceMeters,saved.durationMs)} min/km average")
                 Quiet("View route and details",!busy){open(saved.id)}
             } }
+            if(finished.size>3)TextButton({allRuns=!allRuns}){Text(if(allRuns)"Show recent runs" else "Show all ${finished.size} runs")}
         }
     }
     if(finish && run!=null)Confirm("Finish and save run?",if(points.isEmpty())"No GPS points have been recorded. Only active duration will be saved; distance and pace are unavailable." else "The route, distance, active duration and average pace will be kept locally. Nothing is uploaded.",busy,{finish=false},{vm.runAction(Tracker.FINISH,run.id);finish=false})

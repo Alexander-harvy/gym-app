@@ -10,7 +10,7 @@ class GymApplication : Application() {
     val applicationScope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     val runError=MutableStateFlow<String?>(null)
     val runCommandPending=MutableStateFlow(false)
-    val database by lazy { Room.databaseBuilder(this, GymDatabase::class.java, "gym.db").addMigrations(GymDatabase.MIGRATION_1_2, GymDatabase.MIGRATION_2_3).build() }
+    val database by lazy { Room.databaseBuilder(this, GymDatabase::class.java, "gym.db").addMigrations(GymDatabase.MIGRATION_1_2, GymDatabase.MIGRATION_2_3, GymDatabase.MIGRATION_3_4).build() }
     val repository by lazy { GymRepository(database, PreferenceStore(this)) }
     val backup by lazy { BackupService(repository, contentResolver) }
     val ready: Deferred<Unit> by lazy { applicationScope.async(start=CoroutineStart.LAZY) { repository.runs.recoverInterrupted(); Unit } }

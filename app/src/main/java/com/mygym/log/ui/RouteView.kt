@@ -24,7 +24,7 @@ import kotlin.math.*
 
 /** Local north-up projection. Rendered geometry is never sent to a tile or map provider. */
 @Composable fun RouteView(points: List<RunPoint>) {
-    if(points.isEmpty()) { EmptyState("Waiting for a route","GPS points appear here once an accurate outdoor fix is available. Time can run before GPS is ready.");return }
+    if(points.isEmpty()) { EmptyState("Waiting for a route","Move outdoors to acquire GPS.");return }
     var zoom by remember{mutableFloatStateOf(1f)}
     var pan by remember{mutableStateOf(Offset.Zero)}
     val gestures=rememberTransformableState { z,p,_ -> zoom=(zoom*z).coerceIn(1f,8f);pan+=p }
@@ -77,6 +77,6 @@ import kotlin.math.*
             Text("N ↑",Modifier.align(Alignment.TopEnd).padding(12.dp),color=foreground,style=MaterialTheme.typography.labelLarge)
             Text(if(barMeters>=1000)"${number(barMeters/1000)} km" else "${number(barMeters)} m",Modifier.align(Alignment.BottomStart).padding(start=16.dp,bottom=22.dp),color=foreground,style=MaterialTheme.typography.labelSmall)
         }
-        Text("● Start    ■ ${if(points.size==1)"Current position (also start)" else "End / current position"}\nPinch to zoom · drag to pan · gaps are not joined",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("● Start    ■ Current / end",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

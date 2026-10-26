@@ -23,8 +23,22 @@ class PersistenceTest {
         open()
     }
     private fun open() {
-        db=Room.databaseBuilder(context,GymDatabase::class.java,"persistence-test.db").addMigrations(GymDatabase.MIGRATION_1_2,GymDatabase.MIGRATION_2_3).build()
+        db=Room.databaseBuilder(context,GymDatabase::class.java,"persistence-test.db").addMigrations(GymDatabase.MIGRATION_1_2,GymDatabase.MIGRATION_2_3,GymDatabase.MIGRATION_3_4).build()
         repo=GymRepository(db,PreferenceStore(context))
+    }
+    private fun legacy(version: Int) {
+        val sql=db.openHelper.writableDatabase
+        sql.execSQL("CREATE TABLE RoutineExercise_old (id TEXT NOT NULL PRIMARY KEY, routineId TEXT NOT NULL, exerciseId TEXT NOT NULL, position INTEGER NOT NULL, targetSets INTEGER NOT NULL, targetReps INTEGER NOT NULL, restSeconds INTEGER NOT NULL, FOREIGN KEY(routineId) REFERENCES Routine(id) ON DELETE CASCADE, FOREIGN KEY(exerciseId) REFERENCES Exercise(id) ON DELETE RESTRICT)")
+        sql.execSQL("INSERT INTO RoutineExercise_old SELECT id,routineId,exerciseId,position,targetSets,targetReps,restSeconds FROM RoutineExercise")
+        sql.execSQL("DROP TABLE RoutineExercise")
+        sql.execSQL("ALTER TABLE RoutineExercise_old RENAME TO RoutineExercise")
+        sql.execSQL("CREATE INDEX index_RoutineExercise_routineId ON RoutineExercise(routineId)")
+        sql.execSQL("CREATE INDEX index_RoutineExercise_exerciseId ON RoutineExercise(exerciseId)")
+        sql.execSQL("DROP TABLE BodyMeasurement")
+        if(version<=2){sql.execSQL("DROP TABLE RunPoint");sql.execSQL("DROP TABLE Run")}
+        if(version==1)sql.execSQL("DROP INDEX index_Workout_startedAt")
+        sql.execSQL("PRAGMA user_version = $version")
+        db.close();open()
     }
     @After fun close(){db.close();context.deleteDatabase("persistence-test.db")}
     @Test fun activeWorkoutSurvivesDatabaseReopenAndRoutineEdits() = runBlocking { withContext(Dispatchers.IO) {
@@ -89,9 +103,7 @@ class PersistenceTest {
     @Test fun migrationRetainsWorkoutAndAddsHistoryIndex() = runBlocking { withContext(Dispatchers.IO) {
         val id=repo.start()
         // The sole v1 -> v2 schema difference is this non-unique index.
-        db.openHelper.writableDatabase.execSQL("DROP INDEX index_Workout_startedAt")
-        db.openHelper.writableDatabase.execSQL("PRAGMA user_version = 1")
-        db.close();open()
+        legacy(1)
         assertEquals(id,repo.dao.active()!!.id)
         db.openHelper.readableDatabase.query("PRAGMA index_list('Workout')").use { cursor ->
             var found=false
@@ -104,10 +116,7 @@ class PersistenceTest {
         val exercise=Exercise(name="Squat",muscle="Legs",equipment="Barbell");repo.exercise(exercise)
         repo.addExercise(workout,exercise)
         val before=repo.dao.snapshot()
-        db.openHelper.writableDatabase.execSQL("DROP TABLE RunPoint")
-        db.openHelper.writableDatabase.execSQL("DROP TABLE Run")
-        db.openHelper.writableDatabase.execSQL("PRAGMA user_version = 2")
-        db.close();open()
+        legacy(2)
         assertEquals(before,repo.dao.snapshot())
         val id=repo.runs.start(1000,100)
         assertEquals(id,repo.dao.activeRun()!!.id)
@@ -216,7 +225,7 @@ class PersistenceTest {
         assertNotEquals(id,copy)
         val copiedId=repo.dao.allWorkoutExercises().first{it.workoutId==copy}.id
         val copiedSets=repo.dao.allSets().filter{it.workoutExerciseId==copiedId}
-        assertEquals(2,copiedSets.size);assertTrue(copiedSets.all{it.reps==12 && it.weightKg==0.0 && !it.completed && !it.warmup})
+        assertEquals(2,copiedSets.size);assertTrue(copiedSets.all{it.reps==12 && it.weightKg==25.0 && !it.completed && !it.warmup})
     } }
     @Test fun customRestAppliesToNextCompletionWithoutResettingCurrentTimer() = runBlocking { withContext(Dispatchers.IO) {
         repo.preferences.save(Preferences(restSeconds=90,autoRest=true))
@@ -245,5 +254,60 @@ class PersistenceTest {
         service.restore(Backup(data=Snapshot(),preferences=Preferences()))
         service.restore(b)
         assertEquals(original,repo.dao.snapshot())
+    } }
+    @Test fun migrationThreeToFourRetainsGymAndRunningData() = runBlocking { withContext(Dispatchers.IO) {
+        val e=Exercise(name="Existing exercise",muscle="Legs",equipment="Barbell");repo.exercise(e)
+        val plan=repo.createRoutine("Existing plan");repo.addRoutineExercise(plan,e,3,8,90)
+        repo.start(plan)
+        val run=repo.runs.start(1000,100);repo.runs.pause(run,1100)
+        val before=repo.dao.snapshot()
+        legacy(3)
+        assertEquals(before,repo.dao.snapshot())
+        assertEquals(0.0,repo.dao.allRoutineExercises().single().targetWeightKg,0.0)
+        repo.bodyMeasurement(BodyMeasurement(weightKg=75.0,heightCm=180.0))
+        assertEquals(1,repo.dao.allBodyMeasurements().size)
+    } }
+    @Test fun startingLoadsPopulateSetsButOnlyCompletedWorkingSetsCount() = runBlocking { withContext(Dispatchers.IO) {
+        val e=Exercise(name="Custom load",muscle="Back",equipment="Cable")
+        val plan=repo.createRoutine("Loaded plan")
+        repo.addRoutineExercise(plan,e,3,8,90,custom=true,weightKg=42.5)
+        val id=repo.start(plan)
+        val sets=repo.dao.allSets()
+        assertTrue(sets.all{it.weightKg==42.5 && !it.completed})
+        assertEquals(0.0,com.mygym.log.domain.Metrics.volume(repo.dao.snapshot()),0.0)
+        repo.saveSet(sets[0].copy(completed=true))
+        repo.saveSet(sets[1].copy(completed=true,warmup=true))
+        repo.finish(id)
+        assertEquals(340.0,com.mygym.log.domain.Metrics.volume(repo.dao.snapshot()),.0001)
+        repo.target(repo.dao.allRoutineExercises().single().copy(targetWeightKg=99.0))
+        assertEquals(42.5,repo.dao.set(sets[0].id)!!.weightKg,0.0)
+    } }
+    @Test fun customAndPredefinedLoadsAreSavedAndInvalidLoadLeavesNoOrphan() = runBlocking { withContext(Dispatchers.IO) {
+        val id=repo.start()
+        val predefined=Exercise(name="Bench",muscle="Chest",equipment="Barbell");repo.exercise(predefined)
+        repo.addExercise(id,predefined,2,10,60,weightKg=50.0)
+        val custom=Exercise(name="My exercise",muscle="General",equipment="None")
+        repo.addCustomExercise(id,custom,1,12,30,weightKg=7.5)
+        val sets=repo.dao.allSets();assertEquals(listOf(7.5,50.0,50.0),sets.map{it.weightKg}.sorted())
+        try{repo.addCustomExercise(id,custom.copy(id="bad"),1,8,60,Double.NaN);fail("Invalid weight accepted")}catch(_: IllegalArgumentException){}
+        assertEquals(2,repo.dao.allExercises().size)
+    } }
+    @Test fun bodyMeasurementsAndLoadsPersistAndRoundTripWithoutAffectingExerciseMetrics() = runBlocking { withContext(Dispatchers.IO) {
+        val a=BodyMeasurement(recordedAt=1000,weightKg=75.0,heightCm=178.0)
+        val b=BodyMeasurement(recordedAt=2000,weightKg=74.0)
+        repo.bodyMeasurement(a);repo.bodyMeasurement(b)
+        val e=Exercise(name="Loaded",muscle="Back",equipment="Cable");repo.exercise(e)
+        val plan=repo.createRoutine("Load preset");repo.addRoutineExercise(plan,e,2,10,60,weightKg=25.0)
+        db.close();open()
+        assertEquals(listOf(b,a),repo.dao.allBodyMeasurements())
+        assertEquals(0.0,com.mygym.log.domain.Metrics.volume(repo.dao.snapshot()),0.0)
+        val backup=Backup(data=repo.dao.snapshot(),preferences=Preferences())
+        val service=BackupService(repo,context.contentResolver)
+        service.restore(Backup(data=Snapshot(),preferences=Preferences()))
+        service.restore(backup)
+        assertEquals(backup.data,repo.dao.snapshot())
+        repo.dao.deleteBodyMeasurement(b.id)
+        assertEquals(listOf(a),repo.dao.allBodyMeasurements())
+        assertEquals(25.0,repo.dao.allRoutineExercises().single().targetWeightKg,0.0)
     } }
 }

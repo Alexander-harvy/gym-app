@@ -49,9 +49,14 @@ interface GymDao {
     @Insert suspend fun insert(value: RunPoint)
     @Query("DELETE FROM Run WHERE id = :id") suspend fun deleteRun(id: String)
     @Query("DELETE FROM Run") suspend fun clearRuns()
+    @Query("SELECT * FROM BodyMeasurement ORDER BY recordedAt DESC, id") fun bodyMeasurements(): Flow<List<BodyMeasurement>>
+    @Query("SELECT * FROM BodyMeasurement ORDER BY recordedAt DESC, id") suspend fun allBodyMeasurements(): List<BodyMeasurement>
+    @Upsert suspend fun put(value: BodyMeasurement)
+    @Query("DELETE FROM BodyMeasurement WHERE id = :id") suspend fun deleteBodyMeasurement(id: String)
+    @Query("DELETE FROM BodyMeasurement") suspend fun clearBodyMeasurements()
 }
 
-@Database(entities = [Exercise::class, Routine::class, RoutineExercise::class, Workout::class, WorkoutExercise::class, WorkoutSet::class, Run::class, RunPoint::class], version = 3, exportSchema = true)
+@Database(entities = [Exercise::class, Routine::class, RoutineExercise::class, Workout::class, WorkoutExercise::class, WorkoutSet::class, Run::class, RunPoint::class, BodyMeasurement::class], version = 4, exportSchema = true)
 abstract class GymDatabase : RoomDatabase() {
     abstract fun dao(): GymDao
     companion object {
@@ -68,13 +73,20 @@ abstract class GymDatabase : RoomDatabase() {
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_RunPoint_runId_sequence` ON `RunPoint` (`runId`, `sequence`)")
             }
         }
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `RoutineExercise` ADD COLUMN `targetWeightKg` REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `BodyMeasurement` (`id` TEXT NOT NULL, `recordedAt` INTEGER NOT NULL, `weightKg` REAL, `heightCm` REAL, `notes` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_BodyMeasurement_recordedAt` ON `BodyMeasurement` (`recordedAt`)")
+            }
+        }
     }
 }
 
-fun GymDao.observe(): Flow<Snapshot> = combine(exercises(), routines(), routineExercises(), workouts(), workoutExercises(), sets(), runs()) { values ->
+fun GymDao.observe(): Flow<Snapshot> = combine(exercises(), routines(), routineExercises(), workouts(), workoutExercises(), sets(), runs(), bodyMeasurements()) { values ->
     @Suppress("UNCHECKED_CAST")
     Snapshot(values[0] as List<Exercise>, values[1] as List<Routine>, values[2] as List<RoutineExercise>,
-        values[3] as List<Workout>, values[4] as List<WorkoutExercise>, values[5] as List<WorkoutSet>, values[6] as List<Run>)
+        values[3] as List<Workout>, values[4] as List<WorkoutExercise>, values[5] as List<WorkoutSet>, values[6] as List<Run>, bodyMeasurements=values[7] as List<BodyMeasurement>)
 }
 
-suspend fun GymDao.snapshot() = Snapshot(allExercises(), allRoutines(), allRoutineExercises(), allWorkouts(), allWorkoutExercises(), allSets(), allRuns(), allRunPoints())
+suspend fun GymDao.snapshot() = Snapshot(allExercises(), allRoutines(), allRoutineExercises(), allWorkouts(), allWorkoutExercises(), allSets(), allRuns(), allRunPoints(), allBodyMeasurements())

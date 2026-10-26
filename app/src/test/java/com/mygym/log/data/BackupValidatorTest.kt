@@ -33,7 +33,7 @@ class BackupValidatorTest {
     @Test fun legacyVersionOneWithoutRunningTablesStillRestores() {
         val original=valid().copy(schemaVersion=1)
         val root=BackupValidator.json.encodeToJsonElement(original).jsonObject
-        val oldData=JsonObject(root.getValue("data").jsonObject.filterKeys{it !in listOf("runs","runPoints")})
+        val oldData=JsonObject(root.getValue("data").jsonObject.filterKeys{it !in listOf("runs","runPoints","bodyMeasurements")})
         val legacy=JsonObject(root.toMutableMap().apply{put("data",oldData)}).toString()
         assertEquals(original,BackupValidator.decode(legacy.byteInputStream()))
     }
@@ -48,5 +48,28 @@ class BackupValidatorTest {
             valid.copy(data=valid.data.copy(runs=listOf(r,r.copy(id="another"))))).forEach { bad ->
             assertThrows(IllegalArgumentException::class.java){BackupValidator.validate(bad)}
         }
+    }
+    @Test fun schemaTwoWithoutBodyOrLoadFieldsGetsSafeDefaults() {
+        val e=Exercise(id="e",name="Exercise",muscle="General",equipment="None")
+        val r=Routine(id="r",name="Plan")
+        val old=Backup(schemaVersion=2,data=Snapshot(exercises=listOf(e),routines=listOf(r),routineExercises=listOf(RoutineExercise(routineId="r",exerciseId="e",position=0))),preferences=Preferences())
+        val root=BackupValidator.json.encodeToJsonElement(old).jsonObject
+        val fields=root.getValue("data").jsonObject.toMutableMap().apply {
+            remove("bodyMeasurements")
+            put("routineExercises",JsonArray(getValue("routineExercises").jsonArray.map{JsonObject(it.jsonObject.filterKeys{key->key!="targetWeightKg"})}))
+        }
+        val legacy=JsonObject(root.toMutableMap().apply{put("data",JsonObject(fields))}).toString()
+        val decoded=BackupValidator.decode(legacy.byteInputStream())
+        assertTrue(decoded.data.bodyMeasurements.isEmpty());assertEquals(0.0,decoded.data.routineExercises.single().targetWeightKg,0.0)
+    }
+    @Test fun schemaThreeRequiresValidBodyFieldsAndLoadValues() {
+        val body=BodyMeasurement(weightKg=75.0,heightCm=180.0)
+        val b=Backup(data=Snapshot(bodyMeasurements=listOf(body)),preferences=Preferences())
+        assertEquals(b,BackupValidator.decode(BackupValidator.json.encodeToString(b).byteInputStream()))
+        assertThrows(IllegalArgumentException::class.java){BackupValidator.validate(b.copy(data=b.data.copy(bodyMeasurements=listOf(body.copy(weightKg=Double.NaN)))))}
+        assertThrows(IllegalArgumentException::class.java){BackupValidator.validate(b.copy(data=b.data.copy(bodyMeasurements=listOf(body,body))))}
+        val root=BackupValidator.json.encodeToJsonElement(b).jsonObject
+        val missing=JsonObject(root.toMutableMap().apply{put("data",JsonObject(root.getValue("data").jsonObject.filterKeys{it!="bodyMeasurements"}))})
+        assertThrows(IllegalArgumentException::class.java){BackupValidator.decode(missing.toString().byteInputStream())}
     }
 }

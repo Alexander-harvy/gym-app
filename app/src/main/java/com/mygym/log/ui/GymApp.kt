@@ -13,14 +13,12 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -32,7 +30,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.mygym.log.BuildConfig
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.compose.*
 import com.mygym.log.data.*
 import com.mygym.log.domain.*
 import kotlinx.coroutines.delay
@@ -51,88 +48,56 @@ fun GymApp(vm: GymViewModel) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val backup by vm.pendingBackup.collectAsStateWithLifecycle()
-    val dark=when(prefs.theme) { "LIGHT"->false; "SYSTEM"->isSystemInDarkTheme(); else->true }
+    val dark=when(prefs.theme){"LIGHT"->false;"SYSTEM"->isSystemInDarkTheme();else->true}
     val view=LocalView.current
     val activity=LocalActivity.current
-    SideEffect { activity?.window?.let { window ->
-        WindowCompat.getInsetsController(window,view).apply { isAppearanceLightStatusBars=!dark;isAppearanceLightNavigationBars=!dark }
-    } }
+    SideEffect { activity?.window?.let { window -> WindowCompat.getInsetsController(window,view).apply {
+        isAppearanceLightStatusBars=!dark;isAppearanceLightNavigationBars=!dark
+    } } }
     GymTheme(dark) {
-        val nav=rememberNavController()
-        val entry by nav.currentBackStackEntryAsState()
-        val snackbar=remember { SnackbarHostState() }
-        val route=entry?.destination?.route ?: "home"
-        val detail=route in listOf("active", "routine/{id}", "workout/{id}", "run/{id}")
-        val activeWorkout=data.workouts.firstOrNull{it.activeSlot==1}
-        val activeRun=data.runs.firstOrNull{it.activeSlot==1}
-        var creatingWorkout by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) {
-            if(activity?.intent?.getBooleanExtra("open_running",false)==true) {
-                activity.intent.removeExtra("open_running");nav.navigate("running"){launchSingleTop=true}
-            }
-        }
-        LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value=null } }
+        val snackbar=remember{SnackbarHostState()}
+        var creatingWorkout by rememberSaveable{mutableStateOf(false)}
+        LaunchedEffect(message){message?.let{snackbar.showSnackbar(it);vm.message.value=null}}
         CompositionLocalProvider(LocalSaveError provides message) {
-        Scaffold(snackbarHost={SnackbarHost(snackbar)}, topBar={
-            TopAppBar(colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background),
-                navigationIcon={if(detail || route in listOf("settings","exercises")) IconButton({nav.popBackStack()}){Icon(Icons.AutoMirrored.Filled.ArrowBack,"Go back")}},
-                title={Column { Text("MY GYM LOG",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Black);Text("YOUR TRAINING JOURNAL",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }},
-                actions={
-                    if(busy) CircularProgressIndicator(Modifier.padding(8.dp).size(20.dp),strokeWidth=2.dp)
-                    IconButton({nav.navigate("exercises"){launchSingleTop=true}}){Icon(Icons.AutoMirrored.Filled.List,"Exercise library",tint=if(route=="exercises")MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
-                    IconButton({nav.navigate("settings"){launchSingleTop=true}}){Icon(Icons.Default.Settings,"Settings",tint=if(route=="settings")MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
+            AppShell(data,busy,snackbar,
+                openRunning=activity?.intent?.getBooleanExtra("open_running",false)==true,
+                onRunningHandled={activity?.intent?.removeExtra("open_running")},
+                primaryContent={page,open->when(page){
+                    "home"->Home(data,busy,{creatingWorkout=true},{open("active")},{open("routines")},{open("history")})
+                    "routines"->Routines(vm,data,prefs,busy,{open("routine/$it")},{open("active")})
+                    "running"->RunningScreen(vm,data,open={open("run/$it")})
+                    "history"->History(vm,data,busy,{open("workout/$it")})
+                    "progress"->Progress(data,prefs,onBody={open("body")})
+                }},
+                detailContent={entry,open,back->when(entry.destination.route){
+                    "exercises"->Exercises(vm,data,busy)
+                    "settings"->Settings(vm,prefs,busy,onBody={open("body")})
+                    "body"->BodyScreen(vm,data,prefs,busy)
+                    "routine/{id}"->RoutineEditor(vm,data,prefs,entry.arguments?.getString("id")!!,busy)
+                    "active"->WorkoutScreen(vm,data,prefs,data.workouts.firstOrNull{it.activeSlot==1}?.id,busy,{open("home")})
+                    "workout/{id}"->WorkoutScreen(vm,data,prefs,entry.arguments?.getString("id"),busy,back)
+                    "run/{id}"->RunningScreen(vm,data,entry.arguments?.getString("id"),open={open("run/$it")})
+                }},
+                overlay={open->
+                    if(creatingWorkout)NewWorkoutForm(busy,{creatingWorkout=false}){name,notes->
+                        vm.act(onSuccess={creatingWorkout=false;open("active")}){vm.repo.start(name=name,notes=notes)}
+                    }
+                    backup?.let{b->Confirm("Replace all local records?",
+                        "Replace current workouts, runs, body measurements and settings with this backup? It contains ${b.data.workouts.size} workouts, ${b.data.runs.size} runs and ${b.data.bodyMeasurements.size} body entries. Pause any recording run first. Export a backup to keep the current records.",
+                        busy,{vm.pendingBackup.value=null},{vm.restore()})}
                 })
-        },bottomBar={Column(if(detail)Modifier.navigationBarsPadding() else Modifier) {
-            if(activeRun!=null && route!="running" && route!="run/{id}") Surface(color=MaterialTheme.colorScheme.surfaceVariant) {
-                Row(Modifier.fillMaxWidth().padding(start=20.dp,end=8.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Text("RUN ${if(activeRun.state=="RUNNING")"RECORDING" else "PAUSED"}",Modifier.weight(1f),style=MaterialTheme.typography.labelMedium)
-                    TextButton({nav.navigate("running"){launchSingleTop=true}}){Text("Open run")}
-                }
-            }
-            if(activeWorkout!=null && route!="active") Surface(color=MaterialTheme.colorScheme.primaryContainer) {
-                Row(Modifier.fillMaxWidth().padding(start=20.dp,end=8.dp,top=4.dp,bottom=4.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Icon(Icons.Default.PlayArrow,null,tint=MaterialTheme.colorScheme.primary)
-                    Column(Modifier.weight(1f).padding(horizontal=10.dp)){Text("WORKOUT IN PROGRESS",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onPrimaryContainer);Text(activeWorkout.name,style=MaterialTheme.typography.titleSmall,maxLines=1)}
-                    TextButton({nav.navigate("active"){launchSingleTop=true}}){Text("Resume")}
-                }
-            }
-            if(!detail) NavigationBar(containerColor=MaterialTheme.colorScheme.background,tonalElevation=0.dp) {
-                listOf(Triple("home","Home",Icons.Default.Home),Triple("routines","Routines",Icons.AutoMirrored.Filled.List),Triple("running","Run",Icons.Default.PlayArrow),Triple("history","History",Icons.Default.DateRange),Triple("progress","Progress",Icons.Default.Star)).forEach { (destination,label,icon) ->
-                    NavigationBarItem(selected=route==destination,onClick={nav.navigate(destination){launchSingleTop=true;restoreState=true;popUpTo("home"){saveState=true}}},
-                        icon={Icon(icon,null)},label={Text(label)},colors=NavigationBarItemDefaults.colors(selectedIconColor=MaterialTheme.colorScheme.primary,indicatorColor=MaterialTheme.colorScheme.primaryContainer))
-                }
-            }
-        }}) { padding ->
-            NavHost(nav,"home",Modifier.padding(padding)) {
-                composable("home") { Home(data,busy,{creatingWorkout=true},{nav.navigate("active")},{nav.navigate("routines")},{nav.navigate("history")}) }
-                composable("exercises") { Exercises(vm,data,busy) }
-                composable("routines") { Routines(vm,data,prefs,busy,{nav.navigate("routine/$it")},{nav.navigate("active")}) }
-                composable("routine/{id}") { back -> RoutineEditor(vm,data,prefs,back.arguments?.getString("id")!!,busy) }
-                composable("active") { WorkoutScreen(vm,data,prefs,data.workouts.firstOrNull{it.activeSlot==1}?.id,busy,{nav.navigate("home"){popUpTo("home"){inclusive=true}}}) }
-                composable("history") { History(vm,data,busy,{nav.navigate("workout/$it")}) }
-                composable("workout/{id}") { back -> WorkoutScreen(vm,data,prefs,back.arguments?.getString("id"),busy,{nav.popBackStack()}) }
-                composable("progress") { Progress(data,prefs) }
-                composable("settings") { Settings(vm,prefs,busy) }
-                composable("running") { RunningScreen(vm,data,open={nav.navigate("run/$it")}) }
-                composable("run/{id}") { back -> RunningScreen(vm,data,back.arguments?.getString("id"),open={nav.navigate("run/$it")}) }
-            }
-        }
-        if(creatingWorkout)NewWorkoutForm(busy,{creatingWorkout=false}) { name,notes ->
-            vm.act(onSuccess={creatingWorkout=false;nav.navigate("active"){launchSingleTop=true}}) { vm.repo.start(name=name,notes=notes) }
-        }
-        backup?.let { b -> Confirm("Replace all local records?", "This backup contains ${b.data.workouts.size} workouts, ${b.data.runs.size} runs and ${b.data.exercises.size} exercises. Restore replaces all records and settings, including unfinished sessions. Pause any recording run before restoring. Export a backup first if you want to keep your current data.", busy,
-            {vm.pendingBackup.value=null}, {vm.restore()}) }
         }
     }
 }
-
 @Composable
 fun Page(title: String, subtitle: String? = null, content: @Composable ColumnScope.()->Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal=20.dp,vertical=16.dp).widthIn(max=720.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
-        Text(title,style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Bold)
+    Box(Modifier.fillMaxSize(),contentAlignment=Alignment.TopCenter) {
+    Column(Modifier.widthIn(max=720.dp).fillMaxWidth().fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal=20.dp,vertical=16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        Text(title,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
         subtitle?.let { Text(it,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodyMedium) }
         content()
         Spacer(Modifier.height(24.dp))
+    }
     }
 }
 @Composable fun Panel(content: @Composable ColumnScope.()->Unit) { Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(24.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface),border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) { Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content) } }
@@ -161,8 +126,6 @@ fun Page(title: String, subtitle: String? = null, content: @Composable ColumnSco
         Text(label,Modifier.padding(start=12.dp))
     }
 }
-@Composable fun OrderActions(up: ()->Unit, down: ()->Unit, busy: Boolean) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { Quiet("Move up",!busy,up); Quiet("Move down",!busy,down) } }
-
 @Composable
 fun Home(data: Snapshot,busy: Boolean,start: ()->Unit,resume: ()->Unit,routines: ()->Unit,history: ()->Unit) {
     val active=data.workouts.firstOrNull{it.activeSlot==1}
@@ -172,7 +135,7 @@ fun Home(data: Snapshot,busy: Boolean,start: ()->Unit,resume: ()->Unit,routines:
         Surface(shape=RoundedCornerShape(28.dp),color=MaterialTheme.colorScheme.primaryContainer,border=BorderStroke(1.dp,MaterialTheme.colorScheme.primary.copy(alpha=.3f))) {
             Column(Modifier.fillMaxWidth().padding(24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
                 Eyebrow(if(active==null) "Your next session" else "Pick up where you left off")
-                Text(active?.name ?: "Show up.\nGet stronger.",style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Black)
+                Text(active?.name ?: "Your next workout",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
                 Text(active?.let{"Started ${date(it.startedAt)}"} ?: "Create your own workout. Pick any exercises, sets and reps, or follow a saved plan.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Action(if(active==null) "Start workout" else "Resume workout",!busy,if(active==null)start else resume)
             }
@@ -184,7 +147,7 @@ fun Home(data: Snapshot,busy: Boolean,start: ()->Unit,resume: ()->Unit,routines:
         SectionTitle("Your workout plans","View all",routines)
         if(data.routines.isEmpty()) {
             EmptyState("Make your next session easier","Build a routine with your go-to exercises, sets, and reps.")
-            Quiet("Create a routine",onClick=routines)
+            Quiet("Create a plan",onClick=routines)
         } else data.routines.take(2).forEach { r ->
             Card(onClick=routines,shape=RoundedCornerShape(20.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
                 Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -231,8 +194,11 @@ fun Exercises(vm: GymViewModel,data: Snapshot,busy: Boolean) {
 fun ExerciseForm(e: Exercise?,busy: Boolean,dismiss: ()->Unit,save: (Exercise)->Unit) {
     var name by remember { mutableStateOf(e?.name ?: "") };var muscle by remember { mutableStateOf(e?.muscle ?: "") };var equipment by remember { mutableStateOf(e?.equipment ?: "") };var tracking by remember{mutableStateOf(e?.tracking ?: "WEIGHTED")}
     Form(if(e==null) "New exercise" else "Edit exercise",busy,dismiss,{save(Exercise(e?.id ?: newId(),name.trim(),muscle.trim().ifBlank{"General"},equipment.trim().ifBlank{"None"},tracking,e?.archived ?: false))}) {
-        Input("Name",name,{name=it});Input("Muscle group (optional)",muscle,{muscle=it});Input("Equipment (optional)",equipment,{equipment=it});Choices(listOf("WEIGHTED","BODYWEIGHT"),tracking,{tracking=it})
-        Text("Bodyweight sets accept 0 external weight. Added load is recorded separately from your body weight.")
+        Input("Name",name,{name=it});Choices(listOf("WEIGHTED","BODYWEIGHT"),tracking,{tracking=it})
+        Disclosure("Muscle & equipment",initiallyExpanded=e!=null){
+            Input("Muscle group (optional)",muscle,{muscle=it});Input("Equipment (optional)",equipment,{equipment=it})
+        }
+        Text("Set the weight when adding this exercise to a workout.",style=MaterialTheme.typography.bodySmall)
     }
 }
 @Composable
@@ -256,13 +222,13 @@ fun Routines(vm: GymViewModel,data: Snapshot,prefs: Preferences,busy: Boolean,ed
         data.routines.forEach { r -> Panel {
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text(r.name,Modifier.weight(1f),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-                MoreMenu("Options for ${r.name}",busy,listOf(MenuAction("Edit routine"){edit(r.id)},MenuAction("Move up"){vm.act{vm.repo.move("routine",r.id,-1)}},MenuAction("Move down"){vm.act{vm.repo.move("routine",r.id,1)}},MenuAction("Delete routine",true){deleting=r}))
+                MoreMenu("Options for ${r.name}",busy,listOf(MenuAction("Edit plan"){edit(r.id)},MenuAction("Move up"){vm.act{vm.repo.move("routine",r.id,-1)}},MenuAction("Move down"){vm.act{vm.repo.move("routine",r.id,1)}},MenuAction("Delete plan",true){deleting=r}))
             }
             val targets=data.routineExercises.filter{it.routineId==r.id}
             Badge("${targets.size} exercises · ${targets.sumOf{it.targetSets}} sets")
             if(targets.isNotEmpty()) Text(targets.take(3).joinToString(" · "){row->data.exercises.find{it.id==row.exerciseId}?.name ?: "Exercise"},style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Action(if(data.workouts.any{it.activeSlot==1}) "Resume active workout" else "Start routine",!busy){vm.act{vm.repo.start(r.id)};active()}
-            Quiet("Edit routine",!busy){edit(r.id)}
+            Quiet("Edit plan",!busy){edit(r.id)}
         } }
     }
     if(add) Form("Create workout plan",busy,{add=false},{
@@ -290,21 +256,25 @@ fun RoutineEditor(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String,
                 Text(data.exercises.find{it.id==row.exerciseId}?.name ?: "Exercise",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
                 MoreMenu("Routine exercise options",busy,listOf(MenuAction("Move up"){vm.act{vm.repo.move("target",row.id,-1)}},MenuAction("Move down"){vm.act{vm.repo.move("target",row.id,1)}},MenuAction("Remove from routine",true){vm.act{vm.repo.dao.deleteRoutineExercise(row.id)}}))
             }
-            Badge("${row.targetSets} sets × ${row.targetReps} reps · ${row.restSeconds}s rest")
+            Badge("${row.targetSets} × ${row.targetReps} · ${number(Weight.display(row.targetWeightKg,prefs.unit))} ${prefs.unit} · ${row.restSeconds}s rest")
             Quiet("Edit targets",!busy){target=row}
         } }
     }
     if(rename) Form("Rename routine",busy,{rename=false},{vm.act{vm.repo.routine(r.copy(name=name.trim()));rename=false}}){Input("Name",name,{name=it})}
     if(picker) ExercisePicker(data,{picker=false},create={query->selectedExercise=null;customName=query;picker=false;setup=true},busy=busy) { e -> selectedExercise=e;picker=false;setup=true }
-    if(setup)ExerciseSetupForm(selectedExercise,customName,prefs.restSeconds,busy,{setup=false}) { e,sets,reps,rest ->
-        vm.act(onSuccess={setup=false}){vm.repo.addRoutineExercise(id,e,sets,reps,rest,custom=selectedExercise==null)}
+    if(setup)ExerciseSetupForm(selectedExercise,customName,prefs.restSeconds,busy,{setup=false},unit=prefs.unit) { e,sets,reps,rest,weightKg ->
+        vm.act(onSuccess={setup=false}){vm.repo.addRoutineExercise(id,e,sets,reps,rest,custom=selectedExercise==null,weightKg=weightKg)}
     }
-    target?.let { row -> TargetForm(row,busy,{target=null}){updated->vm.act{vm.repo.target(updated);target=null}} }
+    target?.let { row -> TargetForm(row,busy,{target=null},prefs.unit){updated->vm.act{vm.repo.target(updated);target=null}} }
 }
 @Composable
-fun TargetForm(row: RoutineExercise,busy: Boolean,dismiss: ()->Unit,save: (RoutineExercise)->Unit) {
+fun TargetForm(row: RoutineExercise,busy: Boolean,dismiss: ()->Unit,unit: String="kg",save: (RoutineExercise)->Unit) {
     var sets by remember{mutableStateOf(row.targetSets.toString())};var reps by remember{mutableStateOf(row.targetReps.toString())};var rest by remember{mutableStateOf(row.restSeconds.toString())}
-    Form("Routine targets",busy,dismiss,{save(row.copy(targetSets=sets.toIntOrNull() ?: 0,targetReps=reps.toIntOrNull() ?: 0,restSeconds=rest.toIntOrNull() ?: 0))}) {
+    val displayed=number(Weight.display(row.targetWeightKg,unit))
+    var weight by remember{mutableStateOf(displayed)}
+    Form("Plan targets",busy,dismiss,{save(row.copy(targetSets=sets.toIntOrNull() ?: 0,targetReps=reps.toIntOrNull() ?: 0,restSeconds=rest.toIntOrNull() ?: 0,
+        targetWeightKg=if(weight==displayed)row.targetWeightKg else Weight.canonical(weight.toDoubleOrNull() ?: Double.NaN,unit)))}) {
+        Input("Starting weight ($unit)",weight,{weight=it},true)
         Input("Sets (1–50)",sets,{sets=it},true);Input("Reps (1–1,000)",reps,{reps=it},true);Input("Rest seconds (1–3,600)",rest,{rest=it},true)
     }
 }
@@ -363,14 +333,14 @@ fun WorkoutScreen(vm: GymViewModel,data: Snapshot,prefs: Preferences,id: String?
         if(w.activeSlot==1) { Action("Finish workout",!busy){finish=true} }
     }
     if(picker) ExercisePicker(data,{picker=false},create={query->selectedExercise=null;customName=query;picker=false;setup=true},busy=busy){e->selectedExercise=e;picker=false;setup=true}
-    if(setup)ExerciseSetupForm(selectedExercise,customName,prefs.restSeconds,busy,{setup=false}) { e,sets,reps,rest ->
+    if(setup)ExerciseSetupForm(selectedExercise,customName,prefs.restSeconds,busy,{setup=false},unit=prefs.unit) { e,sets,reps,rest,weightKg ->
         vm.act(onSuccess={setup=false}) {
-            if(selectedExercise==null)vm.repo.addCustomExercise(w.id,e,sets,reps,rest)
-            else vm.repo.addExercise(w.id,e,sets,reps,rest)
+            if(selectedExercise==null)vm.repo.addCustomExercise(w.id,e,sets,reps,rest,weightKg)
+            else vm.repo.addExercise(w.id,e,sets,reps,rest,weightKg)
         }
     }
     if(savingPlan)SavePlanForm(w.name,busy,{savingPlan=false}) { name ->
-        vm.act(onSuccess={savingPlan=false;vm.message.value="Workout plan saved. Find it in Routines."}){vm.repo.saveAsRoutine(w.id,name)}
+        vm.act(onSuccess={savingPlan=false;vm.message.value="Workout plan saved. Find it in Plans."}){vm.repo.saveAsRoutine(w.id,name)}
     }
     restExercise?.let { e -> ExerciseRestForm(e.restSeconds,busy,{restExercise=null}) { rest ->
         vm.act(onSuccess={restExercise=null}){vm.repo.exerciseRest(e.id,rest)}
@@ -419,12 +389,12 @@ fun Timer(w: Workout,busy: Boolean,action: (String)->Unit) {
             FilledTonalButton({action(if(running)"pause" else if(seconds>0)"resume" else "start")},enabled=!busy,shape=RoundedCornerShape(14.dp)) { Text(if(running)"Pause" else if(seconds>0)"Resume" else "Start") }
         }
         LinearProgressIndicator(progress={(Metrics.remaining(w,now).toFloat()/w.timerDuration).coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(4.dp),trackColor=MaterialTheme.colorScheme.background)
-        Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             TextButton({action("start")},enabled=!busy){Text("Restart")}
             TextButton({action("reset")},enabled=!busy){Text("Reset")}
             TextButton({action("skip")},enabled=!busy){Text("Skip rest")}
         }
-        Text("Timer stays accurate in the background. No sound or notifications.",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Disclosure("Timer help"){Text("The timer stays accurate when you return. No rest sounds or notifications.",style=MaterialTheme.typography.bodySmall)}
     }
 }
 
@@ -448,10 +418,11 @@ fun History(vm: GymViewModel,data: Snapshot,busy: Boolean,open: (String)->Unit) 
 }
 
 @Composable
-fun Progress(data: Snapshot,prefs: Preferences) {
+fun Progress(data: Snapshot,prefs: Preferences,onBody: ()->Unit={}) {
     var selected by rememberSaveable{mutableStateOf<String?>(null)};var picker by remember{mutableStateOf(false)}
     val exercise=data.exercises.find{it.id==selected}
     Page("See your progress","Small steps. Measurable strength.") {
+        Quiet("Body weight & height",onClick=onBody)
         Panel {
             Eyebrow("Consistency")
             Text("Your last 6 weeks",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
@@ -494,11 +465,12 @@ fun Progress(data: Snapshot,prefs: Preferences) {
 }
 
 @Composable
-fun Settings(vm: GymViewModel,prefs: Preferences,busy: Boolean) {
+fun Settings(vm: GymViewModel,prefs: Preferences,busy: Boolean,onBody: ()->Unit={}) {
     val export=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")){it?.let(vm::export)}
     val restore=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){it?.let(vm::prepareRestore)}
     var rest by remember(prefs.restSeconds){mutableStateOf(prefs.restSeconds.toString())}
     Page("Make it yours","Your preferences. Your data. Always on your device.") {
+        Quiet("Body weight & height",!busy,onBody)
         Panel {
             Text("Weight unit",style=MaterialTheme.typography.titleMedium)
             Choices(listOf("kg","lb"),prefs.unit){unit->vm.act{vm.repo.preferences.save(prefs.copy(unit=unit))}}
@@ -514,7 +486,7 @@ fun Settings(vm: GymViewModel,prefs: Preferences,busy: Boolean) {
         }
         Panel {
             Text("Backup and restore",style=MaterialTheme.typography.titleLarge)
-            Text("Export workouts, runs, GPS routes and preferences to a versioned JSON file. Restore replaces current records after validation and confirmation. Maximum file size: 50 MiB. Pause an active run before restoring.")
+            Text("Export workouts, runs, routes, body measurements and settings. Restore replaces current data after validation and confirmation. Maximum file size: 50 MiB. Pause a recording run first.")
             Action("Export JSON backup",!busy){export.launch("my-gym-log-${LocalDate.now()}.json")}
             Quiet("Restore JSON backup",!busy){restore.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
             Text("Uninstalling or clearing app data removes all local records. Keep an exported backup somewhere safe. The system file picker may offer cloud providers; choose device storage to keep your backup local.",style=MaterialTheme.typography.bodySmall)

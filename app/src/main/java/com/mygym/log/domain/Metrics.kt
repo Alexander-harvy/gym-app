@@ -27,6 +27,13 @@ object Rules {
         require(p.unit in listOf("kg", "lb") && p.theme in listOf("DARK", "LIGHT", "SYSTEM")) { "Invalid preferences." }
         require(p.restSeconds in 1..3600) { "Rest must be 1–3,600 seconds." }
     }
+    fun body(value: BodyMeasurement) {
+        require(value.recordedAt>0) { "Enter a valid measurement date." }
+        require(value.weightKg!=null || value.heightCm!=null) { "Enter a body weight, height, or both." }
+        value.weightKg?.let { require(it.isFinite() && it in .1..1000.0) { "Body weight must be between 0.1 and 1,000 kg." } }
+        value.heightCm?.let { require(it.isFinite() && it in 10.0..300.0) { "Height must be between 10 and 300 cm." } }
+        require(value.notes.length<=10000) { "Notes must be at most 10,000 characters." }
+    }
 }
 
 data class Performance(val set: WorkoutSet, val exercise: WorkoutExercise, val workout: Workout)

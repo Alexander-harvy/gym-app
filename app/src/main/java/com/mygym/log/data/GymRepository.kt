@@ -32,7 +32,8 @@ class GymRepository(val db: GymDatabase, val preferences: PreferenceStore) {
         val r=Routine(name=name,position=(dao.allRoutines().maxOfOrNull{it.position} ?: -1)+1)
         dao.put(r);r.id
     }
-    suspend fun target(r: RoutineExercise) { Rules.targets(r.targetSets, r.targetReps, r.restSeconds); dao.put(r) }
+    suspend fun target(r: RoutineExercise) { Rules.targets(r.targetSets, r.targetReps, r.restSeconds); Rules.set(r.targetWeightKg,r.targetReps); dao.put(r) }
+    suspend fun bodyMeasurement(value: BodyMeasurement) { Rules.body(value);dao.put(value) }
     suspend fun start(routineId: String? = null, name: String? = null, notes: String = ""): String = lock.withLock {
         name?.let { Rules.text(it,"Workout name") }
         require(notes.length<=10000) { "Notes must be at most 10,000 characters." }
@@ -45,32 +46,35 @@ class GymRepository(val db: GymDatabase, val preferences: PreferenceStore) {
                 val e = dao.allExercises().first { it.id == target.exerciseId }
                 val we = WorkoutExercise(workoutId = w.id, exerciseId = e.id, nameSnapshot = e.name, trackingSnapshot = e.tracking, position = target.position, restSeconds = target.restSeconds)
                 dao.put(we)
-                repeat(target.targetSets) { dao.put(WorkoutSet(workoutExerciseId = we.id, position = it, reps = target.targetReps)) }
+                repeat(target.targetSets) { dao.put(WorkoutSet(workoutExerciseId = we.id, position = it, reps = target.targetReps,weightKg=target.targetWeightKg)) }
             }
             w.id
         }
     }
-    suspend fun addExercise(workoutId: String, e: Exercise, targetSets: Int = 1, targetReps: Int = 8, restSeconds: Int? = null) = db.withTransaction {
+    suspend fun addExercise(workoutId: String, e: Exercise, targetSets: Int = 1, targetReps: Int = 8, restSeconds: Int? = null, weightKg: Double=0.0) = db.withTransaction {
         val rest=restSeconds ?: preferences.flow.first().restSeconds
         Rules.targets(targetSets,targetReps,rest)
+        Rules.set(weightKg,targetReps)
         require(dao.workout(workoutId) != null) { "Workout no longer exists." }
         val we = WorkoutExercise(workoutId = workoutId, exerciseId = e.id, nameSnapshot = e.name, trackingSnapshot = e.tracking,
             position = (dao.allWorkoutExercises().filter { it.workoutId == workoutId }.maxOfOrNull { it.position } ?: -1) + 1,
             restSeconds = rest)
         dao.put(we)
-        repeat(targetSets) { dao.put(WorkoutSet(workoutExerciseId = we.id, position = it, reps=targetReps)) }
+        repeat(targetSets) { dao.put(WorkoutSet(workoutExerciseId = we.id, position = it, reps=targetReps,weightKg=weightKg)) }
     }
-    suspend fun addCustomExercise(workoutId: String, e: Exercise, sets: Int, reps: Int, rest: Int) = db.withTransaction {
+    suspend fun addCustomExercise(workoutId: String, e: Exercise, sets: Int, reps: Int, rest: Int, weightKg: Double=0.0) = db.withTransaction {
         Rules.targets(sets,reps,rest)
+        Rules.set(weightKg,reps)
         exercise(e)
-        addExercise(workoutId,e,sets,reps,rest)
+        addExercise(workoutId,e,sets,reps,rest,weightKg)
     }
-    suspend fun addRoutineExercise(routineId: String, e: Exercise, sets: Int, reps: Int, rest: Int, custom: Boolean=false) = db.withTransaction {
+    suspend fun addRoutineExercise(routineId: String, e: Exercise, sets: Int, reps: Int, rest: Int, custom: Boolean=false,weightKg: Double=0.0) = db.withTransaction {
         require(dao.allRoutines().any { it.id==routineId }) { "Routine no longer exists." }
         Rules.targets(sets,reps,rest)
+        Rules.set(weightKg,reps)
         if(custom)exercise(e)
         val position=(dao.allRoutineExercises().filter{it.routineId==routineId}.maxOfOrNull{it.position} ?: -1)+1
-        target(RoutineExercise(routineId=routineId,exerciseId=e.id,position=position,targetSets=sets,targetReps=reps,restSeconds=rest))
+        target(RoutineExercise(routineId=routineId,exerciseId=e.id,position=position,targetSets=sets,targetReps=reps,restSeconds=rest,targetWeightKg=weightKg))
     }
     suspend fun saveAsRoutine(workoutId: String, name: String): String = db.withTransaction {
         Rules.text(name,"Plan name")
@@ -83,7 +87,7 @@ class GymRepository(val db: GymDatabase, val preferences: PreferenceStore) {
         exercises.forEachIndexed { index,e ->
             val working=sets[e.id].orEmpty().filter{!it.warmup}.sortedBy{it.position}
             target(RoutineExercise(routineId=routine.id,exerciseId=e.exerciseId,position=index,
-                targetSets=working.size.coerceAtLeast(1),targetReps=working.firstOrNull()?.reps ?: 8,restSeconds=e.restSeconds))
+                targetSets=working.size.coerceAtLeast(1),targetReps=working.firstOrNull()?.reps ?: 8,restSeconds=e.restSeconds,targetWeightKg=working.firstOrNull()?.weightKg ?: 0.0))
         }
         routine.id
     }
