@@ -44,12 +44,28 @@ data class WorkoutSet(@PrimaryKey val id: String = newId(), val workoutExerciseI
 @Serializable
 data class Snapshot(val exercises: List<Exercise> = emptyList(), val routines: List<Routine> = emptyList(),
     val routineExercises: List<RoutineExercise> = emptyList(), val workouts: List<Workout> = emptyList(),
-    val workoutExercises: List<WorkoutExercise> = emptyList(), val sets: List<WorkoutSet> = emptyList())
+    val workoutExercises: List<WorkoutExercise> = emptyList(), val sets: List<WorkoutSet> = emptyList(),
+    val runs: List<Run> = emptyList(), val runPoints: List<RunPoint> = emptyList())
 
 @Serializable
 data class Preferences(val unit: String = "kg", val theme: String = "DARK", val restSeconds: Int = 90,
     val autoRest: Boolean = true)
 
 @Serializable
-data class Backup(val schemaVersion: Int = 1, val exportedAt: Long = System.currentTimeMillis(),
+data class Backup(val schemaVersion: Int = 2, val exportedAt: Long = System.currentTimeMillis(),
     val data: Snapshot, val preferences: Preferences)
+
+@Serializable
+@Entity(indices = [Index("startedAt"), Index(value = ["activeSlot"], unique = true)])
+data class Run(@PrimaryKey val id: String = newId(), val name: String = "Outdoor run",
+    val startedAt: Long = System.currentTimeMillis(), val finishedAt: Long? = null,
+    val state: String = "PAUSED", val activeSlot: Int? = 1,
+    val durationMs: Long = 0, val lastTickElapsedMs: Long? = null,
+    val distanceMeters: Double = 0.0, val segment: Int = 0, val status: String = "Ready to start")
+
+@Serializable
+@Entity(foreignKeys = [ForeignKey(entity = Run::class, parentColumns = ["id"], childColumns = ["runId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index(value = ["runId", "sequence"], unique = true)])
+data class RunPoint(@PrimaryKey val id: String = newId(), val runId: String, val sequence: Int, val segment: Int,
+    val latitude: Double, val longitude: Double, val accuracyMeters: Double,
+    val timestamp: Long, val elapsedRealtimeMs: Long)

@@ -56,4 +56,17 @@ class UiInteractionTest {
         compose.onNodeWithText("Delete workout").performClick()
         assertTrue(deleted)
     }
+    @Test fun offlineRouteNeedsRealPointsAndHasAnAccessibleFitControl() {
+        var points by mutableStateOf(emptyList<RunPoint>())
+        compose.setContent { GymTheme { Surface { RouteView(points) } } }
+        compose.onNodeWithText("Waiting for a route").assertExists()
+        compose.onNodeWithText("Offline GPS route").assertDoesNotExist()
+        compose.runOnIdle {
+            points=listOf(RunPoint(runId="r",sequence=0,segment=0,latitude=14.0,longitude=121.0,accuracyMeters=5.0,timestamp=1000,elapsedRealtimeMs=100),
+                RunPoint(runId="r",sequence=1,segment=0,latitude=14.0001,longitude=121.0,accuracyMeters=5.0,timestamp=6000,elapsedRealtimeMs=5100))
+        }
+        compose.onNodeWithText("Offline GPS route").assertExists()
+        compose.onNodeWithText("Fit route").performClick()
+        compose.onNodeWithContentDescription("Offline route with 2 recorded GPS points. North is up. Pinch to zoom and drag to pan. No street map.").assertExists()
+    }
 }

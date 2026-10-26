@@ -10,6 +10,7 @@ class GymRepository(val db: GymDatabase, val preferences: PreferenceStore) {
     val dao = db.dao()
     val state = dao.observe()
     val lock = Mutex()
+    val runs = RunRepository(db, lock)
     suspend fun seed() = lock.withLock {
         if (!preferences.isSeeded.first()) {
             db.withTransaction {

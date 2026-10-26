@@ -38,9 +38,20 @@ interface GymDao {
     @Query("DELETE FROM Workout") suspend fun clearWorkouts()
     @Query("DELETE FROM Routine") suspend fun clearRoutines()
     @Query("DELETE FROM Exercise") suspend fun clearExercises()
+    @Query("SELECT * FROM Run ORDER BY startedAt DESC") fun runs(): Flow<List<Run>>
+    @Query("SELECT * FROM RunPoint WHERE runId = :id ORDER BY sequence") fun pointsForRun(id: String): Flow<List<RunPoint>>
+    @Query("SELECT * FROM Run ORDER BY startedAt DESC") suspend fun allRuns(): List<Run>
+    @Query("SELECT * FROM RunPoint ORDER BY runId, sequence") suspend fun allRunPoints(): List<RunPoint>
+    @Query("SELECT * FROM Run WHERE activeSlot = 1 LIMIT 1") suspend fun activeRun(): Run?
+    @Query("SELECT * FROM Run WHERE id = :id") suspend fun run(id: String): Run?
+    @Query("SELECT * FROM RunPoint WHERE runId = :id ORDER BY sequence DESC LIMIT 1") suspend fun lastRunPoint(id: String): RunPoint?
+    @Upsert suspend fun put(value: Run)
+    @Insert suspend fun insert(value: RunPoint)
+    @Query("DELETE FROM Run WHERE id = :id") suspend fun deleteRun(id: String)
+    @Query("DELETE FROM Run") suspend fun clearRuns()
 }
 
-@Database(entities = [Exercise::class, Routine::class, RoutineExercise::class, Workout::class, WorkoutExercise::class, WorkoutSet::class], version = 2, exportSchema = true)
+@Database(entities = [Exercise::class, Routine::class, RoutineExercise::class, Workout::class, WorkoutExercise::class, WorkoutSet::class, Run::class, RunPoint::class], version = 3, exportSchema = true)
 abstract class GymDatabase : RoomDatabase() {
     abstract fun dao(): GymDao
     companion object {
@@ -48,13 +59,22 @@ abstract class GymDatabase : RoomDatabase() {
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE INDEX IF NOT EXISTS index_Workout_startedAt ON Workout (startedAt)") }
         }
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `Run` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `finishedAt` INTEGER, `state` TEXT NOT NULL, `activeSlot` INTEGER, `durationMs` INTEGER NOT NULL, `lastTickElapsedMs` INTEGER, `distanceMeters` REAL NOT NULL, `segment` INTEGER NOT NULL, `status` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_Run_startedAt` ON `Run` (`startedAt`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_Run_activeSlot` ON `Run` (`activeSlot`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `RunPoint` (`id` TEXT NOT NULL, `runId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `segment` INTEGER NOT NULL, `latitude` REAL NOT NULL, `longitude` REAL NOT NULL, `accuracyMeters` REAL NOT NULL, `timestamp` INTEGER NOT NULL, `elapsedRealtimeMs` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`runId`) REFERENCES `Run` (`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_RunPoint_runId_sequence` ON `RunPoint` (`runId`, `sequence`)")
+            }
+        }
     }
 }
 
-fun GymDao.observe(): Flow<Snapshot> = combine(exercises(), routines(), routineExercises(), workouts(), workoutExercises(), sets()) { values ->
+fun GymDao.observe(): Flow<Snapshot> = combine(exercises(), routines(), routineExercises(), workouts(), workoutExercises(), sets(), runs()) { values ->
     @Suppress("UNCHECKED_CAST")
     Snapshot(values[0] as List<Exercise>, values[1] as List<Routine>, values[2] as List<RoutineExercise>,
-        values[3] as List<Workout>, values[4] as List<WorkoutExercise>, values[5] as List<WorkoutSet>)
+        values[3] as List<Workout>, values[4] as List<WorkoutExercise>, values[5] as List<WorkoutSet>, values[6] as List<Run>)
 }
 
-suspend fun GymDao.snapshot() = Snapshot(allExercises(), allRoutines(), allRoutineExercises(), allWorkouts(), allWorkoutExercises(), allSets())
+suspend fun GymDao.snapshot() = Snapshot(allExercises(), allRoutines(), allRoutineExercises(), allWorkouts(), allWorkoutExercises(), allSets(), allRuns(), allRunPoints())

@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import androidx.room.withTransaction
 import com.mygym.log.domain.Rules
+import com.mygym.log.domain.RunMath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
@@ -13,10 +14,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.int
 import java.io.InputStream
 
 object BackupValidator {
-    const val MAX_BYTES = 10 * 1024 * 1024
+    const val MAX_BYTES = 50 * 1024 * 1024
     val json = Json { prettyPrint = true; encodeDefaults = true }
     fun decode(stream: InputStream): Backup {
         val output = java.io.ByteArrayOutputStream()
@@ -24,7 +27,7 @@ object BackupValidator {
         while (true) {
             val read = stream.read(buffer)
             if (read < 0) break
-            require(output.size() + read <= MAX_BYTES) { "Backup exceeds the 10 MiB limit." }
+            require(output.size() + read <= MAX_BYTES) { "Backup exceeds the 50 MiB limit." }
             output.write(buffer, 0, read)
         }
         val bytes = output.toByteArray()
@@ -33,25 +36,34 @@ object BackupValidator {
             require(obj.keys.containsAll(expected.split(','))) { "Backup is missing required fields." }
         }
         fields(root,"schemaVersion,exportedAt,data,preferences")
+        val version=root.getValue("schemaVersion").jsonPrimitive.int
+        require(version in 1..2) { "Unsupported backup schema version." }
         val data=root["data"] as? JsonObject ?: error("Missing backup data.")
         fields(data,"exercises,routines,routineExercises,workouts,workoutExercises,sets")
+        if(version==2)fields(data,"runs,runPoints")
         val pref=root["preferences"] as? JsonObject ?: error("Missing preferences.")
         fields(pref,"unit,theme,restSeconds,autoRest")
-        mapOf("exercises" to "id,name,muscle,equipment,tracking,archived", "routines" to "id,name,position",
+        val tables=mutableMapOf("exercises" to "id,name,muscle,equipment,tracking,archived", "routines" to "id,name,position",
             "routineExercises" to "id,routineId,exerciseId,position,targetSets,targetReps,restSeconds",
             "workouts" to "id,name,startedAt,finishedAt,activeSlot,notes,timerEnd,timerRemaining,timerDuration",
             "workoutExercises" to "id,workoutId,exerciseId,nameSnapshot,trackingSnapshot,position,notes,restSeconds",
-            "sets" to "id,workoutExerciseId,position,weightKg,reps,warmup,completed").forEach { (key, expected) ->
+            "sets" to "id,workoutExerciseId,position,weightKg,reps,warmup,completed")
+        if(version==2) {
+            tables["runs"]="id,name,startedAt,finishedAt,state,activeSlot,durationMs,lastTickElapsedMs,distanceMeters,segment,status"
+            tables["runPoints"]="id,runId,sequence,segment,latitude,longitude,accuracyMeters,timestamp,elapsedRealtimeMs"
+        }
+        tables.forEach { (key, expected) ->
             val rows=data[key] as? JsonArray ?: error("Invalid backup table: $key.")
             rows.forEach { fields(it as? JsonObject ?: error("Invalid backup record."),expected) }
         }
         return json.decodeFromJsonElement<Backup>(root).also(::validate)
     }
     fun validate(b: Backup) {
-        require(b.schemaVersion == 1) { "Unsupported backup schema version." }
+        require(b.schemaVersion in 1..2) { "Unsupported backup schema version." }
         require(b.exportedAt > 0) { "Invalid export timestamp." }
         Rules.preferences(b.preferences)
         val d=b.data
+        require(b.schemaVersion!=1 || (d.runs.isEmpty() && d.runPoints.isEmpty())) { "Running records need backup schema 2." }
         fun ids(values: List<String>) { require(values.size <= 100000 && values.all { it.isNotBlank() && it.length <= 100 } && values.distinct().size == values.size) { "Invalid or duplicate IDs." } }
         ids(d.exercises.map{it.id}); ids(d.routines.map{it.id}); ids(d.routineExercises.map{it.id}); ids(d.workouts.map{it.id}); ids(d.workoutExercises.map{it.id}); ids(d.sets.map{it.id})
         val ex=d.exercises.map{it.id}.toSet(); val routines=d.routines.map{it.id}.toSet(); val workouts=d.workouts.map{it.id}.toSet(); val we=d.workoutExercises.map{it.id}.toSet()
@@ -71,31 +83,55 @@ object BackupValidator {
         fun <T> ordering(rows: List<T>, group: (T)->String, position: (T)->Int) { require(rows.groupBy(group).values.all { list -> list.map(position).distinct().size == list.size }) { "Duplicate ordering positions." } }
         require(d.routines.map{it.position}.distinct().size==d.routines.size) { "Duplicate routine positions." }
         ordering(d.routineExercises,{it.routineId},{it.position}); ordering(d.workoutExercises,{it.workoutId},{it.position}); ordering(d.sets,{it.workoutExerciseId},{it.position})
+        ids(d.runs.map{it.id});ids(d.runPoints.map{it.id})
+        require(d.runs.count{it.activeSlot==1}<=1) { "Multiple active runs." }
+        val runs=d.runs.associateBy{it.id}
+        val grouped=d.runPoints.groupBy{it.runId}
+        require(grouped.keys.all{it in runs}) { "Orphaned run points." }
+        d.runPoints.forEach { require(RunMath.valid(it) && it.sequence>=0 && it.segment>=0) { "Invalid run point." } }
+        d.runs.forEach { run ->
+            Rules.text(run.name,"Run name");require(run.status.length<=250)
+            require(run.startedAt>0 && (run.finishedAt==null || run.finishedAt>=run.startedAt)) { "Invalid run timestamps." }
+            require(run.state in listOf("RUNNING","PAUSED","FINISHED") && run.segment>=0) { "Invalid run state." }
+            require(if(run.state=="FINISHED")run.activeSlot==null && run.finishedAt!=null else run.activeSlot==1 && run.finishedAt==null)
+            require(if(run.state=="RUNNING")run.lastTickElapsedMs!=null && run.lastTickElapsedMs>=0 else run.lastTickElapsedMs==null)
+            require(run.durationMs in 0..RunMath.MAX_DURATION_MS && run.distanceMeters.isFinite() && run.distanceMeters>=0) { "Invalid running metrics." }
+            val points=grouped[run.id].orEmpty().sortedBy{it.sequence}
+            require(points.map{it.sequence}==points.indices.toList()) { "Missing or duplicate route ordering." }
+            require(points.all{it.segment<=run.segment}) { "Invalid route segment." }
+            require(points.zipWithNext().all{(a,b)->b.segment>=a.segment && (b.segment!=a.segment || b.elapsedRealtimeMs>a.elapsedRealtimeMs)}) { "Invalid route timestamps or segments." }
+            require(points.zipWithNext().all{(a,b)-> a.segment!=b.segment ||
+                (b.elapsedRealtimeMs-a.elapsedRealtimeMs<=RunMath.MAX_GAP_MS && RunMath.distance(a,b)/((b.elapsedRealtimeMs-a.elapsedRealtimeMs)/1000.0)<=12.0001)}) { "Implausible route interval." }
+            require(kotlin.math.abs(run.distanceMeters-RunMath.routeDistance(points))<.1) { "Run distance does not match its route." }
+        }
     }
 }
 
 class BackupService(private val repo: GymRepository, private val resolver: ContentResolver) {
     suspend fun export(uri: Uri) = withContext(Dispatchers.IO) {
-        repo.lock.withLock {
-            val b=repo.db.withTransaction { Backup(data=repo.dao.snapshot(),preferences=repo.preferences.flow.first()) }
-            val bytes=BackupValidator.json.encodeToString(b).toByteArray()
-            require(bytes.size<=BackupValidator.MAX_BYTES) { "Data exceeds the 10 MiB backup limit." }
-            resolver.openOutputStream(uri,"wt")?.use{it.write(bytes)} ?: error("Unable to open destination.")
-        }
+        val b=repo.lock.withLock { repo.db.withTransaction { Backup(data=repo.dao.snapshot(),preferences=repo.preferences.flow.first()) } }
+        BackupValidator.validate(b)
+        // File providers and JSON encoding must not block the GPS writer's mutex.
+        val bytes=BackupValidator.json.encodeToString(b).toByteArray()
+        require(bytes.size<=BackupValidator.MAX_BYTES) { "Data exceeds the 50 MiB backup limit." }
+        resolver.openOutputStream(uri,"wt")?.use{it.write(bytes)} ?: error("Unable to open destination.")
     }
     suspend fun read(uri: Uri): Backup = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use(BackupValidator::decode) ?: error("Unable to open backup.") }
     suspend fun restore(b: Backup) = withContext(Dispatchers.IO) {
         BackupValidator.validate(b)
         repo.lock.withLock {
+            require(repo.dao.activeRun()?.state!="RUNNING") { "Pause your running session before restoring a backup." }
             // DataStore and SQLite cannot share a transaction. Roll back preferences on a database failure.
             val previous=repo.preferences.flow.first()
             repo.preferences.save(b.preferences)
             try {
                 repo.db.withTransaction {
-                    val dao=repo.dao; dao.clearWorkouts(); dao.clearRoutines(); dao.clearExercises()
+                    val dao=repo.dao; dao.clearRuns();dao.clearWorkouts(); dao.clearRoutines(); dao.clearExercises()
                     b.data.exercises.forEach { dao.put(it) }; b.data.routines.forEach { dao.put(it) }
                     b.data.routineExercises.forEach { dao.put(it) }; b.data.workouts.forEach { dao.put(it) }
                     b.data.workoutExercises.forEach { dao.put(it) }; b.data.sets.forEach { dao.put(it) }
+                    b.data.runs.forEach { dao.put(if(it.activeSlot==1)it.copy(state="PAUSED",lastTickElapsedMs=null,status="Restored run. Resume when ready.") else it) }
+                    b.data.runPoints.forEach { dao.insert(it) }
                 }
             } catch(e: Exception) { repo.preferences.save(previous); throw e }
             repo.preferences.markSeeded()

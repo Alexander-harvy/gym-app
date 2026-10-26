@@ -1,6 +1,7 @@
 package com.mygym.log.data
 
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -28,5 +29,24 @@ class BackupValidatorTest {
         assertThrows(IllegalArgumentException::class.java){BackupValidator.decode("{broken".byteInputStream())}
         assertThrows(IllegalArgumentException::class.java){BackupValidator.decode(ByteArray(BackupValidator.MAX_BYTES+1).inputStream())}
         assertThrows(IllegalArgumentException::class.java){BackupValidator.decode("{\"data\":{},\"preferences\":{}}".byteInputStream())}
+    }
+    @Test fun legacyVersionOneWithoutRunningTablesStillRestores() {
+        val original=valid().copy(schemaVersion=1)
+        val root=BackupValidator.json.encodeToJsonElement(original).jsonObject
+        val oldData=JsonObject(root.getValue("data").jsonObject.filterKeys{it !in listOf("runs","runPoints")})
+        val legacy=JsonObject(root.toMutableMap().apply{put("data",oldData)}).toString()
+        assertEquals(original,BackupValidator.decode(legacy.byteInputStream()))
+    }
+    @Test fun invalidRunningCoordinatesOrDistancesCannotReachRestore() {
+        val r=Run(id="r",startedAt=1000)
+        val p=RunPoint(runId="r",sequence=0,segment=0,latitude=14.0,longitude=121.0,accuracyMeters=5.0,timestamp=1000,elapsedRealtimeMs=100)
+        val valid=Backup(data=Snapshot(runs=listOf(r),runPoints=listOf(p)),preferences=Preferences())
+        BackupValidator.validate(valid)
+        listOf(valid.copy(data=valid.data.copy(runPoints=listOf(p.copy(latitude=Double.NaN)))),
+            valid.copy(data=valid.data.copy(runs=listOf(r.copy(distanceMeters=100.0)))),
+            valid.copy(data=valid.data.copy(runPoints=listOf(p.copy(runId="missing")))),
+            valid.copy(data=valid.data.copy(runs=listOf(r,r.copy(id="another"))))).forEach { bad ->
+            assertThrows(IllegalArgumentException::class.java){BackupValidator.validate(bad)}
+        }
     }
 }

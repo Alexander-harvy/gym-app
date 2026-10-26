@@ -14,7 +14,14 @@ class GymViewModel(private val app: GymApplication) : ViewModel() {
     val busy=MutableStateFlow(false)
     val message=MutableStateFlow<String?>(null)
     val pendingBackup=MutableStateFlow<Backup?>(null)
-    init { act { repo.seed() } }
+    val runError=app.runError
+    val runCommandPending=app.runCommandPending
+    fun runAction(action: String,id: String?=null) {
+        runError.value=null
+        try { com.mygym.log.running.RunTrackingService.send(app,action,id) }
+        catch(e: Exception){runError.value=e.message ?: "Unable to start tracking."}
+    }
+    init { act { app.ready.await(); repo.seed() } }
     fun act(block: suspend () -> Unit) {
         if(busy.value) return
         busy.value=true

@@ -62,8 +62,14 @@ fun GymApp(vm: GymViewModel) {
         val entry by nav.currentBackStackEntryAsState()
         val snackbar=remember { SnackbarHostState() }
         val route=entry?.destination?.route ?: "home"
-        val detail=route in listOf("active", "routine/{id}", "workout/{id}")
+        val detail=route in listOf("active", "routine/{id}", "workout/{id}", "run/{id}")
         val activeWorkout=data.workouts.firstOrNull{it.activeSlot==1}
+        val activeRun=data.runs.firstOrNull{it.activeSlot==1}
+        LaunchedEffect(Unit) {
+            if(activity?.intent?.getBooleanExtra("open_running",false)==true) {
+                activity.intent.removeExtra("open_running");nav.navigate("running"){launchSingleTop=true}
+            }
+        }
         LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value=null } }
         CompositionLocalProvider(LocalSaveError provides message) {
         Scaffold(snackbarHost={SnackbarHost(snackbar)}, topBar={
@@ -76,6 +82,12 @@ fun GymApp(vm: GymViewModel) {
                     IconButton({nav.navigate("settings"){launchSingleTop=true}}){Icon(Icons.Default.Settings,"Settings",tint=if(route=="settings")MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
                 })
         },bottomBar={Column(if(detail)Modifier.navigationBarsPadding() else Modifier) {
+            if(activeRun!=null && route!="running" && route!="run/{id}") Surface(color=MaterialTheme.colorScheme.surfaceVariant) {
+                Row(Modifier.fillMaxWidth().padding(start=20.dp,end=8.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Text("RUN ${if(activeRun.state=="RUNNING")"RECORDING" else "PAUSED"}",Modifier.weight(1f),style=MaterialTheme.typography.labelMedium)
+                    TextButton({nav.navigate("running"){launchSingleTop=true}}){Text("Open run")}
+                }
+            }
             if(activeWorkout!=null && route!="active") Surface(color=MaterialTheme.colorScheme.primaryContainer) {
                 Row(Modifier.fillMaxWidth().padding(start=20.dp,end=8.dp,top=4.dp,bottom=4.dp),verticalAlignment=Alignment.CenterVertically) {
                     Icon(Icons.Default.PlayArrow,null,tint=MaterialTheme.colorScheme.primary)
@@ -84,7 +96,7 @@ fun GymApp(vm: GymViewModel) {
                 }
             }
             if(!detail) NavigationBar(containerColor=MaterialTheme.colorScheme.background,tonalElevation=0.dp) {
-                listOf(Triple("home","Home",Icons.Default.Home),Triple("routines","Routines",Icons.AutoMirrored.Filled.List),Triple("history","History",Icons.Default.DateRange),Triple("progress","Progress",Icons.Default.Star)).forEach { (destination,label,icon) ->
+                listOf(Triple("home","Home",Icons.Default.Home),Triple("routines","Routines",Icons.AutoMirrored.Filled.List),Triple("running","Run",Icons.Default.PlayArrow),Triple("history","History",Icons.Default.DateRange),Triple("progress","Progress",Icons.Default.Star)).forEach { (destination,label,icon) ->
                     NavigationBarItem(selected=route==destination,onClick={nav.navigate(destination){launchSingleTop=true;restoreState=true;popUpTo("home"){saveState=true}}},
                         icon={Icon(icon,null)},label={Text(label)},colors=NavigationBarItemDefaults.colors(selectedIconColor=MaterialTheme.colorScheme.primary,indicatorColor=MaterialTheme.colorScheme.primaryContainer))
                 }
@@ -100,9 +112,11 @@ fun GymApp(vm: GymViewModel) {
                 composable("workout/{id}") { back -> WorkoutScreen(vm,data,prefs,back.arguments?.getString("id"),busy,{nav.popBackStack()}) }
                 composable("progress") { Progress(data,prefs) }
                 composable("settings") { Settings(vm,prefs,busy) }
+                composable("running") { RunningScreen(vm,data,open={nav.navigate("run/$it")}) }
+                composable("run/{id}") { back -> RunningScreen(vm,data,back.arguments?.getString("id"),open={nav.navigate("run/$it")}) }
             }
         }
-        backup?.let { b -> Confirm("Replace all local records?", "This backup contains ${b.data.workouts.size} workouts and ${b.data.exercises.size} exercises. Restore replaces all current records and settings, including an unfinished workout. Export a backup first if you want to keep them.", busy,
+        backup?.let { b -> Confirm("Replace all local records?", "This backup contains ${b.data.workouts.size} workouts, ${b.data.runs.size} runs and ${b.data.exercises.size} exercises. Restore replaces all records and settings, including unfinished sessions. Pause any recording run before restoring. Export a backup first if you want to keep your current data.", busy,
             {vm.pendingBackup.value=null}, {vm.restore()}) }
         }
     }
@@ -465,7 +479,7 @@ fun Settings(vm: GymViewModel,prefs: Preferences,busy: Boolean) {
         }
         Panel {
             Text("Backup and restore",style=MaterialTheme.typography.titleLarge)
-            Text("Export records and preferences to a versioned JSON file. Restore replaces current records after validation and confirmation. Maximum file size: 10 MiB.")
+            Text("Export workouts, runs, GPS routes and preferences to a versioned JSON file. Restore replaces current records after validation and confirmation. Maximum file size: 50 MiB. Pause an active run before restoring.")
             Action("Export JSON backup",!busy){export.launch("my-gym-log-${LocalDate.now()}.json")}
             Quiet("Restore JSON backup",!busy){restore.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
             Text("Uninstalling or clearing app data removes all local records. Keep an exported backup somewhere safe. The system file picker may offer cloud providers; choose device storage to keep your backup local.",style=MaterialTheme.typography.bodySmall)
