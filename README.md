@@ -2,6 +2,8 @@
 
 A native, personal strength-training log for Android 8.0 (API 26) and newer. Kotlin, Jetpack Compose / Material 3, Navigation Compose, ViewModel / StateFlow, Room, DataStore and coroutines. One application module and manual dependency injection. No account, subscription, ads, analytics, backend, or INTERNET permission. Android automatic backup is disabled.
 
+Version 1.1 refreshes the interface with charcoal surfaces and yellow accents, a four-tab bottom navigation bar, a dashboard with weekly / total counts, a persistent resume shortcut, searchable exercise library, and compact workout set rows. Tap a set's values to edit; tap its check button to save completion and start rest when auto-rest is enabled. Secondary actions such as reordering, notes, archiving and deletion are available from each card's labelled options menu. Progress includes accessible weekly bars with exact counts and all-time weekly totals. Dark, light and system preferences remain available.
+
 ## Open and build
 
 Open this directory in Android Studio. Use JDK 17 or 21 (Android Studio's bundled JBR works), install Android SDK Platform 35 and accept the SDK licences. Set the SDK location in Android Studio, `ANDROID_HOME`, or an untracked `local.properties` file. Gradle downloads build dependencies on first sync; the installed app works entirely offline.
@@ -78,4 +80,4 @@ Tests in `app/src/test` cover weight conversions, invalid input, completed-set /
 
 Build, lint, test and device results for this workspace are recorded in `VERIFICATION.md`. No device or emulator result should be inferred merely from successful compilation.
 
-Focused first-version choices: no cloud sync, nutrition, coaching, social features or background alerts; move buttons provide accessible reordering; backups are whole-dataset replacement rather than merging. Screen content scrolls, respects system insets and uses Material text, labelled fields and 48dp minimum action targets.
+Focused choices: no cloud sync, nutrition, coaching, social features or background alerts; labelled Move up / Move down menu items provide reordering; backups are whole-dataset replacement rather than merging. Screen content scrolls, respects system insets and uses Material text, labelled fields and 48dp minimum action targets. Android Studio Compose previews are included for the Home dashboard and set rows.
