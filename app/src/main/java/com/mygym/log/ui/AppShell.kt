@@ -63,7 +63,7 @@ private class TabMotion { var job: Job?=null }
     Scaffold(snackbarHost={SnackbarHost(snackbar)},topBar={
         TopAppBar(colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background),
             navigationIcon={if(!primary)IconButton({back()}){Icon(Icons.AutoMirrored.Filled.ArrowBack,"Go back")}},
-            title={Text("MY GYM LOG",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold,maxLines=1)},
+            title={Text("GYM",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold,maxLines=1)},
             actions={
                 Box(Modifier.size(32.dp),contentAlignment=Alignment.Center){if(busy)CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp)}
                 IconButton({open("exercises")}){Icon(painterResource(R.drawable.ic_exercises),"Exercise library",tint=if(route=="exercises")MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)}
@@ -75,7 +75,7 @@ private class TabMotion { var job: Job?=null }
         if((workout!=null && visible!="active") || (run!=null && visible!="running" && visible!="run/{id}"))Surface(color=MaterialTheme.colorScheme.surface) {
             Row(Modifier.fillMaxWidth().padding(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(workout!=null && visible!="active")TextButton({open("active")},Modifier.weight(1f).heightIn(min=48.dp)){Text("Resume workout",maxLines=1,overflow=TextOverflow.Ellipsis)}
-                if(run!=null && visible!="running" && visible!="run/{id}")TextButton({open("running")},Modifier.weight(1f).heightIn(min=48.dp)){Text(if(run.state=="RUNNING")"Run recording" else "Run paused",maxLines=1,overflow=TextOverflow.Ellipsis)}
+                if(run!=null && visible!="running" && visible!="run/{id}")TextButton({open("running")},Modifier.weight(1f).heightIn(min=48.dp)){Text(if(run.state=="RUNNING")"Activity recording" else "Activity paused",maxLines=1,overflow=TextOverflow.Ellipsis)}
             }
         }
         if(primary)NavigationBar(containerColor=MaterialTheme.colorScheme.background,tonalElevation=0.dp) {

@@ -1,60 +1,50 @@
-# Verification — My Gym Log 1.4 — October 26, 2026 (Asia/Manila)
+# Verification — Gym 1.5 — October 27, 2026 (Asia/Manila)
 
-## Final result
+## Result
 
-`assembleDebug testDebugUnitTest lintDebug` completed with **BUILD SUCCESSFUL**, using Gradle 8.13, Android Studio JBR 21 and Android SDK 35.
+`assembleDebug testDebugUnitTest lintDebug` passed. The suite contains **66 tests**, with 0 failures/errors. Final APK details and lint summary are recorded below after packaging.
 
-- **60 tests passed**, 0 failures, 0 errors: 5 gym metrics, 5 running calculations / filtering, 3 body-progress calculations / validation, 7 backup validation, 20 Room persistence / migration / customization, 4 GPS service cases (API 28 and 35), 4 navigation regressions and 12 Compose interaction tests.
-- Lint: **0 errors, 14 warnings** about target SDK 35, newer AndroidX dependencies, and two String.toUri style suggestions. No errors were suppressed to pass verification.
-- Debug APK: `My-Gym-Log.apk` at the project root and `app/build/outputs/apk/debug/app-debug.apk`, copied from the verified ASCII output directory. Version **1.4**, code **5**, app ID `com.mygym.log`, min SDK 26, target SDK 35. The existing local debug signing key supports an in-place update.
-- APK SHA-256: `E73A93EFA574C80E31FBC2414C022259CA11BAE052D4833C0994B0E01B904BD7`.
-- Room schema **4** exported to `app/schemas/com.mygym.log.data.GymDatabase/4.json`; schemas 2 and 3 remain committed. Explicit 1→2, 2→3 and 3→4 migrations are registered without destructive fallback.
-- APK inspection with SDK aapt confirms location, foreground service / location service, and notification permissions. There is **no INTERNET, broad storage or ACCESS_BACKGROUND_LOCATION permission**. AndroidX also declares an app-private receiver permission. Automatic cloud backup and device transfer remain disabled.
+The installed app is **Gym** (Get your muscle), version 1.5 / code 6. Application ID remains `com.mygym.log`; the existing debug signing key is retained so this installs as an update. Room schema is **5**, JSON backup schema is **4**. Explicit migrations preserve prior workouts, runs and body measurements. Legacy runs default to RUN with zero session steps. Backup schemas 1–3 remain supported.
 
-Reports copied into this project:
+## New verification
 
-- `app/build/reports/tests/testDebugUnitTest/index.html`
-- `app/build/test-results/testDebugUnitTest/TEST-*.xml`
-- `app/build/reports/lint-results-debug.html`
-- `app/build/reports/lint-results-debug.txt`
+- Both actual map packs were downloaded from OpenFreeMap: **Manila City, 55 tiles / 15,027,393 bytes**, and **Metro Manila, 146 tiles / 11,717,436 bytes** (tile bytes; fonts and metadata are additional). Source snapshot: `20261025_080012_pt`; downloaded October 27, 2026. Each download was sequential, identified the app, and remained below provider limits. An initial larger high-detail Metro download stopped at its size limit; final Metro coverage uses zooms 10–13, with zooms 10–14 for Manila City.
+- `tools/verify_map_pack.py` parses every tile as MVT, confirms expected street/name/water/place layers, checks the label font, tile counts and size limits, and compares every bundled map file byte-for-byte against the APK. Both packs passed.
+- An Android/Robolectric integration test installs both packs into app-private storage, verifies the style references only local `file:///` tile/font URLs, removes the City pack and restores it from bundled assets without a network download. This does **not** test native OpenGL map rendering.
+- Coverage tests include Manila locations and outside-area rejection. The UI chooses a pack containing the entire recorded route, otherwise uses the existing sketch. Separate route segments remain separate on the map.
+- Step tests verify initial baselines, pause/resume baselines, device-counter resets and invalid readings. Room tests verify walking steps survive reopen, paused steps are ignored, resumed totals accumulate and walking data round-trips through backups. Invalid negative step totals are rejected.
+- The 4→5 upgrade is tested using a real legacy-column database, alongside the prior migration tests. Existing gym/running data are retained.
+- Service tests on API 28 and 35 verify GPS/foreground notification behavior, location-permission denial, and walking with unavailable/denied step access continuing GPS tracking. Sensor listeners follow the foreground session lifecycle. A test setup race was fixed by awaiting the step availability status before asserting it.
+- Previous metrics, custom workout, body measurements, backup validation, navigation, Compose and simulated GPS regression tests pass.
 
-## What was checked
-
-Customization tests verify named workouts, inline exercises, targets, rollback without orphan records, independent plans, plan conversion without rewriting the original session, rest controls and backup round trips. Starting external loads now populate both custom and predefined exercise sets and are saved with plans. Tests confirm those loads do not count as completed progress until the appropriate sets are completed in a finished workout; warm-ups and incomplete sets stay excluded. Changing a plan's load does not modify existing session weights.
-
-Body tests cover independent latest weight / height values, weight change, unit conversion and edit precision, invalid / non-finite / empty values, local dates and future-date validation, database reopen, editing / deletion, and backup round trips. Body mass is not included in exercise volume. The 3→4 migration preserves gym and running records and gives existing plans zero starting load. Migration tests exercise the registered chains from legacy versions 1, 2 and 3. Backup schema 3 includes body entries and plan loads, while schemas 1 and 2 restore safe defaults; missing or invalid schema-3 fields are rejected before replacement.
-
-Navigation tests exercise the real NavHost / HorizontalPager shell with tab taps, left/right swipes, rapid taps during an unfinished animation, navigation from a page link, repeated library opening and Back, and dragging the real route component without switching pages. Main pages share one pager selection; only secondary / editor screens use back-stack entries. The distinct dumbbell library icon and fixed saving-indicator slot avoid duplicate icons and shifting toolbar controls. Run instructions, optional fields and timer explanations use collapsed disclosures; toggle behavior is tested.
-
-Running tests verify haversine distance and min/km pace, monotonic elapsed time, exclusion of pauses, filtering inaccurate / stale / out-of-order fixes and GPS jumps, segment breaks after gaps and resume, coordinate bounds and dateline distance, persistence after database reopen, recovery into paused state, concurrent starts returning one run, cascading route deletion, and migration retaining existing strength records.
-
-Backup tests verify legacy schema-1 compatibility, schema-2 running data, invalid coordinates / distance / relationships, rejection of restore during recording, preserved route points, and imported active runs paused with device-specific clock anchors cleared. Existing gym calculations, resume, routine snapshots and restore regressions passed.
-
-Service tests create a foreground notification, register a GPS listener, deliver a simulated fix through Android's LocationManager shadow, confirm a Room point was written, pause the service, confirm recording stops, and reject startup without precise permission. These run on Robolectric API 28 and 35; they are not physical GPS tests. An initial simulated-fix test exposed a test setup race; it now waits for listener registration before injection.
-
-Compose tests verify set controls and busy guards, Home states, options menus, route controls, named workouts, custom exercise entry, kg/lb starting-load entry for both exercise types, body-entry validation and preservation of full precision while editing notes. Tests use a full activity-sized host and default Robolectric display metrics. Explicit width / height qualifiers previously caused dialog TextFields to hang; the test-only override was removed for the [reported Robolectric issue](https://github.com/robolectric/robolectric/issues/8460). No tests are disabled or skipped. These are not screenshot or visual layout verification.
-
-## Reproduce verification
+## Reproduce
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:JDK_JAVA_OPTIONS = '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp'
-.\gradlew.bat assembleDebug testDebugUnitTest lintDebug --no-daemon --console=plain '-PgymBuildRoot=C:/Users/Alexander San Pedro/.codex/visualizations/2026/10/25/01a173f4-a3b4-73c1-a066-a76f231c9d64/android-build'
+Set-Location -LiteralPath 'C:\Projects\ChatGPT\gym app'
+.\gradlew.bat assembleDebug testDebugUnitTest lintDebug --no-daemon --console=plain
+python tools\verify_map_pack.py app\build\outputs\apk\debug\app-debug.apk
+python tools\verify_map_pack.py --metro app\build\outputs\apk\debug\app-debug.apk
 ```
 
-The ASCII output directory works around this Windows JDK's test-classpath encoding issue with the Japanese workspace path. Sources stay in this project. The short JBR socket path avoids its loopback initialization error. On a normal ASCII path, use the standard README commands. Gradle reports plugin deprecations for a future Gradle 9 upgrade and a deprecated Robolectric GPS-listener inspection helper; neither fails this build.
+Reports: `app/build/reports/tests/testDebugUnitTest/index.html`, `app/build/test-results/testDebugUnitTest/TEST-*.xml`, and `app/build/reports/lint-results-debug.html`.
 
-## Unverified on hardware
+## Limits and phone checks
 
-`adb devices` completed and listed **no connected device or emulator**; emulator inventory was also empty. Visual navigation smoothness, Android screen-edge gestures, font scaling, TalkBack, keyboard layout, outdoor GPS, actual permission dialogs, notification actions, screen-off recording, battery / OEM behavior, physical process death / reboot and real file-picker behavior remain **unverified on a device**. No hardware test is claimed to have passed.
+No connected phone or emulator was available (`adb devices` was empty; no AVDs were configured). Native MapLibre/OpenGL rendering, Latin street-label readability, map/pager gesture interaction, real sensor events, screen-off tracking, actual permission prompts and OEM battery behavior remain **unverified on hardware**. No hardware success is claimed.
 
-On the intended phone, install as an update and try rapid tab taps, swipes, library / Back, map pan, and dialogs at the preferred font size. Add starting loads in kg and lb; verify completed-set progress. Log body weight / height, edit a note, reopen and export / restore a backup. For running, do a short outdoor and screen-off test as described in the README. Export current records before testing replacement restore. Manufacturer power policies can interrupt foreground services.
+Install `Gym.apk` over the existing app. In airplane mode, open the Run page, inspect both included map areas, pan/zoom, view a saved route and verify an uncovered route uses the sketch. Remove and restore an included area without internet. While online, download an additional area, test cancellation/retry and then reopen it offline. In Walk mode, grant Physical activity access, carry the phone for a short walk, pause/resume, finish, reopen history and export/restore a backup. Repeat with the permission denied; distance/time should remain available and steps should be labelled unavailable.
 
-## Scope and limits
+Steps are session totals, not an all-day pedometer. Sensor batching and registration boundaries can omit some steps; paused or interrupted time is excluded. Without hardware support or activity permission, steps are not estimated. GPS waiting time counts toward active duration. Existing process interruption recovery pauses an unfinished activity and requires explicit resume.
 
-Runs, coordinates and statistics stay in local Room tables. The map is an offline north-up projection of recorded GPS points with a reference grid, start / end markers, scale, pan and zoom. It has **no streets, tiles, navigation, elevation or route planning**. Pauses and signal gaps are not bridged with guessed distance. Pace is an estimate from active duration and recorded distance; GPS acquisition / wait time remains in active duration. No automatic pause is implemented.
+Map tiles, fonts and style are local when viewing. Only user-requested area downloads contact OpenFreeMap and reveal the requested area/IP address; run coordinates, steps and other personal records are never uploaded. Download jobs run while the app process is alive, not as guaranteed background workers. Incomplete packs are cleaned on next initialization and can be retried. Downloads need free storage and have tile/byte limits. Maps are snapshots; no navigation, satellite imagery or automatic updates are included. Panning outside a pack shows no new street data. Non-Latin-only labels may be absent because the bundled font covers the Latin range.
 
-The foreground service intentionally does not automatically restart after process death. The app recovers an unfinished run paused at its last checkpoint, excludes downtime and requires explicit resume; up to about five seconds of duration can be lost. GPS disablement or permission loss stops tracking safely. The gym rest timer still has no background alerts.
+JSON backups contain activity/body records and settings, not offline map files. Included map packs can be restored locally; additional areas can be downloaded again. Exported backups are unencrypted and may contain sensitive routes/body data; choose a device-local destination if you want the export kept local. Android automatic cloud backup/device transfer remain disabled.
 
-JSON backups include sensitive route coordinates in **unencrypted** form and are limited to 50 MiB / 100,000 records per table. Restore replaces current records; old gym-only backups contain no runs. Database replacement is transactional, while DataStore settings cannot share the SQLite transaction; the abrupt-process-kill settings interval is documented in the README. A cloud file provider can upload a manually exported backup even though this app has no internet permission; choose device storage to keep the file local.
+## APK
+
+Final artifact: `Gym.apk` (also copied to the old `My-Gym-Log.apk` filename for compatibility).
+SHA-256: 0F1980960F84F790CF414C8DC6815FCC93A54BA333F8F753D6DAFAFC69665DAB
+Lint: 0 errors, 20 warnings (dependency updates, target SDK, platform/storage and Kotlin style suggestions; no lint errors suppressed).

@@ -23,11 +23,13 @@ class PersistenceTest {
         open()
     }
     private fun open() {
-        db=Room.databaseBuilder(context,GymDatabase::class.java,"persistence-test.db").addMigrations(GymDatabase.MIGRATION_1_2,GymDatabase.MIGRATION_2_3,GymDatabase.MIGRATION_3_4).build()
+        db=Room.databaseBuilder(context,GymDatabase::class.java,"persistence-test.db").addMigrations(GymDatabase.MIGRATION_1_2,GymDatabase.MIGRATION_2_3,GymDatabase.MIGRATION_3_4,GymDatabase.MIGRATION_4_5).build()
         repo=GymRepository(db,PreferenceStore(context))
     }
     private fun legacy(version: Int) {
         val sql=db.openHelper.writableDatabase
+        if(version>=3) oldRunColumns()
+
         sql.execSQL("CREATE TABLE RoutineExercise_old (id TEXT NOT NULL PRIMARY KEY, routineId TEXT NOT NULL, exerciseId TEXT NOT NULL, position INTEGER NOT NULL, targetSets INTEGER NOT NULL, targetReps INTEGER NOT NULL, restSeconds INTEGER NOT NULL, FOREIGN KEY(routineId) REFERENCES Routine(id) ON DELETE CASCADE, FOREIGN KEY(exerciseId) REFERENCES Exercise(id) ON DELETE RESTRICT)")
         sql.execSQL("INSERT INTO RoutineExercise_old SELECT id,routineId,exerciseId,position,targetSets,targetReps,restSeconds FROM RoutineExercise")
         sql.execSQL("DROP TABLE RoutineExercise")
@@ -40,6 +42,41 @@ class PersistenceTest {
         sql.execSQL("PRAGMA user_version = $version")
         db.close();open()
     }
+    private fun oldRunColumns() {
+        val sql=db.openHelper.writableDatabase
+        sql.execSQL("PRAGMA foreign_keys=OFF")
+        sql.execSQL("CREATE TABLE Run_old (id TEXT NOT NULL PRIMARY KEY,name TEXT NOT NULL,startedAt INTEGER NOT NULL,finishedAt INTEGER,state TEXT NOT NULL,activeSlot INTEGER,durationMs INTEGER NOT NULL,lastTickElapsedMs INTEGER,distanceMeters REAL NOT NULL,segment INTEGER NOT NULL,status TEXT NOT NULL)")
+        sql.execSQL("INSERT INTO Run_old SELECT id,name,startedAt,finishedAt,state,activeSlot,durationMs,lastTickElapsedMs,distanceMeters,segment,status FROM Run")
+        sql.execSQL("DROP TABLE Run")
+        sql.execSQL("ALTER TABLE Run_old RENAME TO Run")
+        sql.execSQL("CREATE INDEX index_Run_startedAt ON Run(startedAt)")
+        sql.execSQL("CREATE UNIQUE INDEX index_Run_activeSlot ON Run(activeSlot)")
+        sql.execSQL("PRAGMA foreign_keys=ON")
+    }
+    @Test fun migrationFourToFiveAndWalkingRoundTrip() = runBlocking { withContext(Dispatchers.IO) {
+        val id=repo.runs.start(1000,100)
+        repo.runs.pause(id,200)
+        oldRunColumns()
+        db.openHelper.writableDatabase.execSQL("PRAGMA user_version=4")
+        db.close();open()
+        val old=repo.dao.run(id)!!
+        assertEquals("RUN",old.activityType);assertEquals(0L,old.steps)
+        repo.runs.finish(id,2000,300)
+        val walk=repo.runs.start(3000,400,"WALK")
+        repo.runs.steps(walk,12,"COUNTING")
+        repo.runs.pause(walk,500)
+        repo.runs.steps(walk,99,"COUNTING")
+        assertEquals(12L,repo.dao.run(walk)!!.steps)
+        db.close();open()
+        assertEquals("WALK",repo.dao.run(walk)!!.activityType)
+        repo.runs.resume(walk,600);repo.runs.steps(walk,8,"COUNTING");repo.runs.finish(walk,4000,700)
+        assertEquals(20L,repo.dao.run(walk)!!.steps)
+        val backup=Backup(data=repo.dao.snapshot(),preferences=Preferences())
+        val bytes=BackupValidator.json.encodeToString(Backup.serializer(),backup).byteInputStream()
+        val decoded=BackupValidator.decode(bytes)
+        assertEquals(20L,decoded.data.runs.single{it.id==walk}.steps)
+        try {BackupValidator.validate(backup.copy(data=backup.data.copy(runs=backup.data.runs.map{it.copy(steps=-1)})));fail("Negative steps accepted")}catch(_: IllegalArgumentException){}
+    } }
     @After fun close(){db.close();context.deleteDatabase("persistence-test.db")}
     @Test fun activeWorkoutSurvivesDatabaseReopenAndRoutineEdits() = runBlocking { withContext(Dispatchers.IO) {
         val e=Exercise(name="Squat",muscle="Legs",equipment="Barbell")

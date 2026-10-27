@@ -487,11 +487,11 @@ fun Settings(vm: GymViewModel,prefs: Preferences,busy: Boolean,onBody: ()->Unit=
         Panel {
             Text("Backup and restore",style=MaterialTheme.typography.titleLarge)
             Text("Export workouts, runs, routes, body measurements and settings. Restore replaces current data after validation and confirmation. Maximum file size: 50 MiB. Pause a recording run first.")
-            Action("Export JSON backup",!busy){export.launch("my-gym-log-${LocalDate.now()}.json")}
+            Action("Export JSON backup",!busy){export.launch("gym-${LocalDate.now()}.json")}
             Quiet("Restore JSON backup",!busy){restore.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
             Text("Uninstalling or clearing app data removes all local records. Keep an exported backup somewhere safe. The system file picker may offer cloud providers; choose device storage to keep your backup local.",style=MaterialTheme.typography.bodySmall)
         }
-        Text("My Gym Log · version ${BuildConfig.VERSION_NAME}",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+        Text("Gym · Get your muscle · version ${BuildConfig.VERSION_NAME}",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
     }
 }
 

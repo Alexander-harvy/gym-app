@@ -37,7 +37,7 @@ object BackupValidator {
         }
         fields(root,"schemaVersion,exportedAt,data,preferences")
         val version=root.getValue("schemaVersion").jsonPrimitive.int
-        require(version in 1..3) { "Unsupported backup schema version." }
+        require(version in 1..4) { "Unsupported backup schema version." }
         val data=root["data"] as? JsonObject ?: error("Missing backup data.")
         fields(data,"exercises,routines,routineExercises,workouts,workoutExercises,sets")
         if(version>=2)fields(data,"runs,runPoints")
@@ -57,6 +57,7 @@ object BackupValidator {
             tables["routineExercises"]="id,routineId,exerciseId,position,targetSets,targetReps,restSeconds,targetWeightKg"
             tables["bodyMeasurements"]="id,recordedAt,weightKg,heightCm,notes"
         }
+        if(version>=4) tables["runs"]=tables.getValue("runs")+",activityType,steps,stepStatus"
         tables.forEach { (key, expected) ->
             val rows=data[key] as? JsonArray ?: error("Invalid backup table: $key.")
             rows.forEach { fields(it as? JsonObject ?: error("Invalid backup record."),expected) }
@@ -64,7 +65,7 @@ object BackupValidator {
         return json.decodeFromJsonElement<Backup>(root).also(::validate)
     }
     fun validate(b: Backup) {
-        require(b.schemaVersion in 1..3) { "Unsupported backup schema version." }
+        require(b.schemaVersion in 1..4) { "Unsupported backup schema version." }
         require(b.exportedAt > 0) { "Invalid export timestamp." }
         Rules.preferences(b.preferences)
         val d=b.data
@@ -85,7 +86,7 @@ object BackupValidator {
             require(it.timerDuration in 1000..3600000 && it.timerRemaining in 0..it.timerDuration && (it.timerEnd == null || it.timerEnd>0)) { "Invalid timer state." }
             require(it.activeSlot == 1 || (it.timerEnd == null && it.timerRemaining == 0L))
         }
-        d.workoutExercises.forEach { require(it.workoutId in workouts && it.exerciseId in ex && it.position>=0) { "Broken workout relationship." }; Rules.text(it.nameSnapshot,"Exercise snapshot"); require(it.trackingSnapshot in listOf("WEIGHTED","BODYWEIGHT")); require(it.notes.length<=10000 && it.restSeconds in 1..3600) }
+        d.workoutExercises.forEach { require(it.workoutId in workouts && it.exerciseId in ex && it.position>=0) { "Broken workout relationship." }; Rules.text(it.nameSnapshot,"Exercise snapshot"); require(it.trackingSnapshot in listOf("WEIGHTED","BODYWEIGHT")); require(it.notes.length<=10000 && it.restSeconds in 1..4600) }
         d.sets.forEach { require(it.workoutExerciseId in we && it.position>=0) { "Broken set relationship." }; Rules.set(it.weightKg,it.reps) }
         fun <T> ordering(rows: List<T>, group: (T)->String, position: (T)->Int) { require(rows.groupBy(group).values.all { list -> list.map(position).distinct().size == list.size }) { "Duplicate ordering positions." } }
         require(d.routines.map{it.position}.distinct().size==d.routines.size) { "Duplicate routine positions." }
@@ -97,6 +98,8 @@ object BackupValidator {
         require(grouped.keys.all{it in runs}) { "Orphaned run points." }
         d.runPoints.forEach { require(RunMath.valid(it) && it.sequence>=0 && it.segment>=0) { "Invalid run point." } }
         d.runs.forEach { run ->
+            require(run.activityType in listOf("RUN","WALK") && run.steps in 0..100000000 && run.stepStatus in listOf("UNAVAILABLE","DENIED","COUNTING")) { "Invalid walking data." }
+            require(b.schemaVersion>=4 || (run.activityType=="RUN" && run.steps==0L && run.stepStatus=="UNAVAILABLE")) { "Walking data needs backup schema 4." }
             Rules.text(run.name,"Run name");require(run.status.length<=250)
             require(run.startedAt>0 && (run.finishedAt==null || run.finishedAt>=run.startedAt)) { "Invalid run timestamps." }
             require(run.state in listOf("RUNNING","PAUSED","FINISHED") && run.segment>=0) { "Invalid run state." }

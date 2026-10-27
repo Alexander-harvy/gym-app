@@ -16,9 +16,9 @@ class GymViewModel(private val app: GymApplication) : ViewModel() {
     val pendingBackup=MutableStateFlow<Backup?>(null)
     val runError=app.runError
     val runCommandPending=app.runCommandPending
-    fun runAction(action: String,id: String?=null) {
+    fun runAction(action: String,id: String?=null,activityType: String="RUN") {
         runError.value=null
-        try { com.mygym.log.running.RunTrackingService.send(app,action,id) }
+        try { com.mygym.log.running.RunTrackingService.send(app,action,id,activityType) }
         catch(e: Exception){runError.value=e.message ?: "Unable to start tracking."}
     }
     init { act { app.ready.await(); repo.seed() } }

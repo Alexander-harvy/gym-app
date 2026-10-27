@@ -54,7 +54,7 @@ data class Preferences(val unit: String = "kg", val theme: String = "DARK", val 
     val autoRest: Boolean = true)
 
 @Serializable
-data class Backup(val schemaVersion: Int = 3, val exportedAt: Long = System.currentTimeMillis(),
+data class Backup(val schemaVersion: Int = 4, val exportedAt: Long = System.currentTimeMillis(),
     val data: Snapshot, val preferences: Preferences)
 
 @Serializable
@@ -63,7 +63,10 @@ data class Run(@PrimaryKey val id: String = newId(), val name: String = "Outdoor
     val startedAt: Long = System.currentTimeMillis(), val finishedAt: Long? = null,
     val state: String = "PAUSED", val activeSlot: Int? = 1,
     val durationMs: Long = 0, val lastTickElapsedMs: Long? = null,
-    val distanceMeters: Double = 0.0, val segment: Int = 0, val status: String = "Ready to start")
+    val distanceMeters: Double = 0.0, val segment: Int = 0, val status: String = "Ready to start",
+    @ColumnInfo(defaultValue = "'RUN'") val activityType: String = "RUN",
+    @ColumnInfo(defaultValue = "0") val steps: Long = 0,
+    @ColumnInfo(defaultValue = "'UNAVAILABLE'") val stepStatus: String = "UNAVAILABLE")
 
 @Serializable
 @Entity(foreignKeys = [ForeignKey(entity = Run::class, parentColumns = ["id"], childColumns = ["runId"], onDelete = ForeignKey.CASCADE)],

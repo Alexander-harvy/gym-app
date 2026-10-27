@@ -1,0 +1,14 @@
+{
+  "name": "Metro Manila",
+  "west": 120.9,
+  "south": 14.34,
+  "east": 121.2,
+  "north": 14.87,
+  "minZoom": 10,
+  "maxZoom": 13,
+  "tiles": 146,
+  "bytes": 11717436,
+  "source": "https://tiles.openfreemap.org/planet/20261025_080012_pt/{z}/{x}/{y}.pbf",
+  "downloadedAt": "2026-10-27",
+  "attribution": "OpenFreeMap / OpenMapTiles / OpenStreetMap contributors"
+}

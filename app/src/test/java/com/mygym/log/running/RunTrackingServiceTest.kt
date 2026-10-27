@@ -57,6 +57,24 @@ class RunTrackingServiceTest {
             assertEquals(count,runBlocking{app.repository.dao.allRunPoints().size})
         } finally { controller.destroy() }
     }
+    @Test fun walkingWithoutStepPermissionStillTracksGps() {
+        val app=ApplicationProvider.getApplicationContext<GymApplication>()
+        runBlocking{app.ready.await();app.repository.dao.clearRuns()}
+        shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION)
+        shadowOf(app).denyPermissions(Manifest.permission.ACTIVITY_RECOGNITION)
+        val controller=Robolectric.buildService(RunTrackingService::class.java).create()
+        val manager=controller.get().getSystemService(LocationManager::class.java)
+        shadowOf(manager).setProviderEnabled(LocationManager.GPS_PROVIDER,true)
+        try {
+            controller.get().onStartCommand(Intent(app,RunTrackingService::class.java).setAction(RunTrackingService.START).putExtra("activityType","WALK"),0,1)
+            waitFor {runBlocking{app.repository.dao.activeRun()?.state=="RUNNING"}}
+            waitFor {runBlocking {app.repository.dao.activeRun()?.stepStatus==(if(android.os.Build.VERSION.SDK_INT>=29)"DENIED" else "UNAVAILABLE")} }
+            val walk=runBlocking{app.repository.dao.activeRun()!!}
+            assertEquals("WALK",walk.activityType);assertEquals(0L,walk.steps)
+            assertEquals(if(android.os.Build.VERSION.SDK_INT>=29)"DENIED" else "UNAVAILABLE",walk.stepStatus)
+            assertNotNull(shadowOf(controller.get()).lastForegroundNotification)
+        } finally {controller.destroy()}
+    }
     @Test fun missingPrecisePermissionDoesNotCreateARun() {
         val app=ApplicationProvider.getApplicationContext<GymApplication>()
         runBlocking{app.ready.await();app.repository.dao.clearRuns()}

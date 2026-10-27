@@ -56,10 +56,17 @@ interface GymDao {
     @Query("DELETE FROM BodyMeasurement") suspend fun clearBodyMeasurements()
 }
 
-@Database(entities = [Exercise::class, Routine::class, RoutineExercise::class, Workout::class, WorkoutExercise::class, WorkoutSet::class, Run::class, RunPoint::class, BodyMeasurement::class], version = 4, exportSchema = true)
+@Database(entities = [Exercise::class, Routine::class, RoutineExercise::class, Workout::class, WorkoutExercise::class, WorkoutSet::class, Run::class, RunPoint::class, BodyMeasurement::class], version = 5, exportSchema = true)
 abstract class GymDatabase : RoomDatabase() {
     abstract fun dao(): GymDao
     companion object {
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `Run` ADD COLUMN `activityType` TEXT NOT NULL DEFAULT 'RUN'")
+                db.execSQL("ALTER TABLE `Run` ADD COLUMN `steps` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `Run` ADD COLUMN `stepStatus` TEXT NOT NULL DEFAULT 'UNAVAILABLE'")
+            }
+        }
         // Version 2 adds a history-ordering index without changing any saved records.
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE INDEX IF NOT EXISTS index_Workout_startedAt ON Workout (startedAt)") }

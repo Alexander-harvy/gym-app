@@ -12,10 +12,11 @@ class RunRepository(private val db: GymDatabase, private val lock: Mutex) {
             dao.put(it.copy(state="PAUSED",lastTickElapsedMs=null,status="Tracking was interrupted. Saved data is safe; resume when ready."))
         }
     } }
-    suspend fun start(now: Long, elapsedNow: Long): String = lock.withLock { db.withTransaction {
+    suspend fun start(now: Long, elapsedNow: Long, activityType: String = "RUN"): String = lock.withLock { db.withTransaction {
         val existing=dao.activeRun()
         if(existing!=null) return@withTransaction existing.id
-        val run=Run(startedAt=now,state="RUNNING",lastTickElapsedMs=elapsedNow,status="Waiting for an accurate GPS fix. Head outdoors.")
+        require(activityType in listOf("RUN","WALK"))
+        val run=Run(activityType=activityType,name=if(activityType=="WALK")"Outdoor walk" else "Outdoor run",startedAt=now,state="RUNNING",lastTickElapsedMs=elapsedNow,status="Waiting for an accurate GPS fix. Head outdoors.")
         dao.put(run);run.id
     } }
     suspend fun resume(id: String, elapsedNow: Long) = lock.withLock { db.withTransaction {
@@ -50,6 +51,12 @@ class RunRepository(private val db: GymDatabase, private val lock: Mutex) {
         require(run.durationMs>0 || RunMath.elapsed(run,elapsedNow)>0) { "Record some running time before finishing." }
         dao.put(run.copy(state="FINISHED",activeSlot=null,finishedAt=now.coerceAtLeast(run.startedAt),
             durationMs=RunMath.elapsed(run,elapsedNow),lastTickElapsedMs=null,status="Finished"))
+    } }
+    suspend fun steps(id: String, delta: Long, status: String) = lock.withLock { db.withTransaction {
+        dao.run(id)?.takeIf { it.state=="RUNNING" && it.activityType=="WALK" }?.let {
+            require(delta in 0..10000)
+            dao.put(it.copy(steps=(it.steps+delta).coerceAtMost(100000000),stepStatus=status))
+        }
     } }
     suspend fun delete(id: String) = lock.withLock { dao.deleteRun(id) }
 }
