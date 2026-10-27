@@ -114,7 +114,7 @@ fun runPace(meters: Double, ms: Long): String {
                 }
             }
             SectionTitle("Your route")
-            StreetRouteView(points)
+            RouteView(points)
             Text("${points.size} GPS points · stored locally",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(run.state=="FINISHED")TextButton({deleting=run},enabled=!busy){Text("Delete saved $activityLabel",color=MaterialTheme.colorScheme.error)}
         } else if(detailId==null) {
@@ -124,14 +124,12 @@ fun runPace(meters: Double, ms: Long): String {
                 FilterChip(activityType=="WALK",{activityType="WALK"},label={Text("Walk")})
             }
             Action(if(activityType=="WALK")"Start walk" else "Start run",!busy){request(Tracker.START)}
-            StreetRouteView(emptyList())
         } else EmptyState("Run no longer available","This record may have been deleted or replaced by a backup restore.")
-        if(detailId==null)OfflineMapControls(points)
         Disclosure("Run tips & permissions") {
             Text("Use precise location outdoors. A recording notification offers Pause. If notifications are blocked, use the app's controls.",style=MaterialTheme.typography.bodySmall)
             Quiet("Location settings",!busy){context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))}
             TextButton({context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}")))}){Text("App permissions")}
-            Text("Average pace = unpaused time ÷ recorded distance. GPS waiting time counts. Pauses and signal gaps are not joined on the offline route; street maps work inside downloaded areas. Walking steps use your phone sensor during active sessions; carry your phone. Steps are not a daily total. Pinch to zoom or drag to pan the route. No background-location permission is requested.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Average pace = unpaused time ÷ recorded distance. GPS waiting time counts. Pauses and signal gaps are not joined on the offline route; the sketch shows your recorded path without street maps. Walking steps use your phone sensor during active sessions; carry your phone. Steps are not a daily total. Pinch to zoom or drag to pan the route. No background-location permission is requested.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if(detailId==null) {
             SectionTitle("Run & walk history")
